@@ -9,8 +9,8 @@
 
 ## Direção técnica planejada
 
-- Base atual: Python 3.14 e Django 5.2, com dependência declarada em requirements.txt. Django REST Framework e PostgreSQL ainda serão configurados.
-- Planeja-se PostgreSQL em Docker Compose, API e testes no Python local da .venv. Ainda não existem serviços configurados nem comandos de execução validados.
+- Base atual: Python 3.14, Django 5.2 e psycopg 3.3, com dependências declaradas em requirements.txt. Django REST Framework e pytest ainda serão acrescentados.
+- compose.yaml define PostgreSQL 17 local, porta publicada no loopback e volume persistente. Django roda na .venv local; settings.py lê as variáveis POSTGRES_* do ambiente. Não presumir instalação, serviço iniciado ou migrations aplicadas sem evidência.
 - Hospedagem escolhida para a demonstração: Vercel Hobby para Django/DRF e interface simples, Neon Free para PostgreSQL. Validar um deploy mínimo e a conexão ao banco cedo; ainda não houve deploy. Verificar cotas e configuração dos planos gratuitos antes de publicar.
 - A demonstração deve executar requisições HTTP reais e persistir resultados, com dados fictícios e receptores controlados. Manter a interface pequena e servir a API e a interface no mesmo projeto quando possível.
 - MVP proposto: cadastrar destinos autorizados e seu tipo de evento, registrar um evento para um único destino, solicitar uma tentativa síncrona e consultar estado e tentativa. Não pressupor envio automático, fila ou múltiplos destinatários.
