@@ -2,14 +2,14 @@
 
 ## Fontes e escopo
 
-- Este repositório inicia o Webhook Delivery Service, terceiro projeto de portfólio. Está em planejamento; não há aplicação, testes ou MVP concluído nesta etapa. Confira os arquivos antes de afirmar o que existe.
-- Quando existir, o README.md será a referência pública do comportamento implementado e dos comandos de execução. Planos não são funcionalidades entregues.
+- Este repositório inicia o Webhook Delivery Service, terceiro projeto de portfólio. A estrutura padrão do Django foi gerada em manage.py e config/; ainda não há endpoints de webhooks, testes ou MVP concluído. Confira os arquivos antes de afirmar o que existe.
+- O README.md é a referência pública do comportamento implementado e dos comandos de execução. Planos não são funcionalidades entregues.
 - Consulte docs/CONTEXTO_DESENVOLVIMENTO.md para preferências privadas e docs/ESTADO_WEBHOOK_DELIVERY.md para o estado recente, quando disponíveis. Não copie esses documentos para commits ou PRs.
 - Inspecione o código e o estado do Git antes de presumir branches, testes, configuração ou publicação. Mantenha mudanças pequenas e relacionadas ao pedido.
 
 ## Direção técnica planejada
 
-- Stack proposta: Python, Django, Django REST Framework e PostgreSQL. Versões e dependências serão confirmadas na preparação do ambiente.
+- Base atual: Python 3.14 e Django 5.2, com dependência declarada em requirements.txt. Django REST Framework e PostgreSQL ainda serão configurados.
 - Planeja-se PostgreSQL em Docker Compose, API e testes no Python local da .venv. Ainda não existem serviços configurados nem comandos de execução validados.
 - Hospedagem escolhida para a demonstração: Vercel Hobby para Django/DRF e interface simples, Neon Free para PostgreSQL. Validar um deploy mínimo e a conexão ao banco cedo; ainda não houve deploy. Verificar cotas e configuração dos planos gratuitos antes de publicar.
 - A demonstração deve executar requisições HTTP reais e persistir resultados, com dados fictícios e receptores controlados. Manter a interface pequena e servir a API e a interface no mesmo projeto quando possível.
@@ -35,6 +35,7 @@
 - Persistir a tentativa antes da chamada externa e seu resultado depois. Evitar transação de banco aberta durante a chamada; impedir duas solicitações concorrentes de iniciar o mesmo evento.
 - Timeout não prova que o destinatário deixou de receber o evento. Não prometer entrega exatamente uma vez nem recuperar automaticamente envios de resultado incerto.
 - Mantenha docs/, .env, variantes locais de .env e .venv/ fora do versionamento. .env.example deve conter somente exemplos sem segredos.
+- A configuração atual lê DJANGO_SECRET_KEY do ambiente e usa DEBUG = True para desenvolvimento local. Carregue o .env no terminal conforme o README; o Django não o lê automaticamente. Ajustar as configurações antes de publicar.
 
 ## Verificação
 
