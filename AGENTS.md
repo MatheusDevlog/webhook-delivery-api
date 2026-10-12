@@ -9,7 +9,7 @@
 
 ## Direção técnica planejada
 
-- Base atual: Python 3.14, Django 5.2 e psycopg 3.3, com dependências declaradas em requirements.txt. Django REST Framework e pytest ainda serão acrescentados.
+- Base atual: Python 3.14, Django 5.2, DRF 3.18 e psycopg 3.3, com dependências declaradas em requirements.txt. requirements-dev.txt inclui essas dependências e acrescenta pytest 9 e pytest-django 4; instalação conforme README.
 - compose.yaml define PostgreSQL 17 local, porta publicada no loopback e volume persistente. Django roda na .venv local; settings.py lê as variáveis POSTGRES_* do ambiente. Não presumir instalação, serviço iniciado ou migrations aplicadas sem evidência.
 - Hospedagem escolhida para a demonstração: Vercel Hobby para Django/DRF e interface simples, Neon Free para PostgreSQL. Validar um deploy mínimo e a conexão ao banco cedo; ainda não houve deploy. Verificar cotas e configuração dos planos gratuitos antes de publicar.
 - A demonstração deve executar requisições HTTP reais e persistir resultados, com dados fictícios e receptores controlados. Manter a interface pequena e servir a API e a interface no mesmo projeto quando possível.
@@ -39,7 +39,7 @@
 
 ## Verificação
 
-- Planejar pytest e pytest-django com PostgreSQL. O comando previsto é python -m pytest -q, após configurar o ambiente; ainda não foi executado neste projeto.
+- pytest.ini define config.settings e descoberta de test_*.py. Usar pytest e pytest-django com PostgreSQL local, em banco de testes separado quando necessário. O comando é python -m pytest -q; ainda não há testes implementados nem execução de suíte verificada. Nenhum teste encontrado (código 5) não significa aprovação.
 - Acrescente testes de comportamento a cada parte: sucesso, entradas inválidas, recurso inexistente, efeitos no banco, repetição e concorrência no envio, falhas HTTP/rede e restrições de destino.
 - Testes automatizados devem simular HTTP externo e DNS, sem depender de serviços públicos nem enviar dados reais. Testes de concorrência devem usar transações reais do PostgreSQL quando necessário.
 - manage.py check e verificações de migrations complementam os testes de comportamento.

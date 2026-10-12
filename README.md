@@ -4,7 +4,7 @@ Projeto de backend para registrar eventos, enviar webhooks a destinos autorizado
 
 ## Estado atual
 
-A estrutura padrão do Django foi gerada e configurada para PostgreSQL local em Docker Compose. Os endpoints de webhooks e os testes ainda não foram implementados; a demonstração ainda não foi publicada.
+A estrutura padrão do Django foi gerada e configurada para PostgreSQL local em Docker Compose. O Django REST Framework está registrado e as ferramentas de testes estão declaradas. Os endpoints de webhooks e os testes ainda não foram implementados; a demonstração ainda não foi publicada.
 
 O MVP planejado terá uma tentativa síncrona por evento, registro do resultado HTTP e consulta do estado. A demonstração usará dados fictícios e receptores controlados.
 
@@ -19,13 +19,15 @@ O MVP planejado terá uma tentativa síncrona por evento, registro do resultado 
 
 A base foi gerada com Python 3.14 e Django 5.2.18. O banco local usa a imagem oficial PostgreSQL 17. Tenha Docker com Compose disponível e execute os comandos na raiz do repositório.
 
-Crie e ative o ambiente virtual, depois instale as dependências:
+Crie e ative o ambiente virtual, depois instale as dependências de desenvolvimento:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
 ```
+
+`requirements.txt` declara Django, DRF e psycopg. `requirements-dev.txt` inclui esse arquivo e acrescenta pytest e pytest-django. Para executar a aplicação sem ferramentas de testes, instale somente `requirements.txt`.
 
 O arquivo `.env.example` mostra a variável necessária, sem uma chave real. Para criar um `.env` local com uma chave aleatória, execute uma única vez, quando o arquivo ainda não existir:
 
@@ -82,6 +84,25 @@ docker compose down
 ```
 
 As credenciais e o banco definidos na imagem oficial são criados na primeira inicialização de um volume vazio. Alterar a senha no `.env` depois não altera a senha de um banco existente. A conta inicial tem privilégios de administrador para este ambiente local; a hospedagem terá configuração própria.
+
+## Ferramentas de testes
+
+`pytest.ini` indica `config.settings` para inicializar Django e procura arquivos chamados `test_*.py`. Os testes serão escritos conforme os comportamentos da API forem implementados.
+
+Após instalar as dependências de desenvolvimento, confirme a instalação:
+
+```bash
+python -m pip check
+python -m pytest --version
+```
+
+Quando existirem testes, execute com a `.venv` ativa, as variáveis do `.env` carregadas e o PostgreSQL disponível:
+
+```bash
+python -m pytest -q
+```
+
+Ainda não há testes para executar; nesse estado, pytest informa que nenhum teste foi encontrado e encerra com código 5. Isso não é uma suíte aprovada. Nos testes que acessarem dados, pytest-django usará um banco de testes separado, criado no PostgreSQL local.
 
 As instruções para iniciar a API e seus exemplos de uso serão acrescentados conforme a implementação avançar.
 
