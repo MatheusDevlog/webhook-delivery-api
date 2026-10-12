@@ -4,7 +4,7 @@ Projeto de backend para registrar eventos, enviar webhooks a destinos autorizado
 
 ## Estado atual
 
-A estrutura padrão do Django foi gerada e configurada para PostgreSQL local em Docker Compose. O Django REST Framework está registrado e as ferramentas de testes estão declaradas. Os endpoints de webhooks e os testes ainda não foram implementados; a demonstração ainda não foi publicada.
+A estrutura padrão do Django foi gerada e configurada para PostgreSQL local em Docker Compose. O Django REST Framework está registrado e as ferramentas de testes estão declaradas. Existe uma rota de saúde da aplicação com testes automatizados escritos. Os endpoints de webhooks ainda não foram implementados; a demonstração ainda não foi publicada.
 
 O MVP planejado terá uma tentativa síncrona por evento, registro do resultado HTTP e consulta do estado. A demonstração usará dados fictícios e receptores controlados.
 
@@ -85,9 +85,31 @@ docker compose down
 
 As credenciais e o banco definidos na imagem oficial são criados na primeira inicialização de um volume vazio. Alterar a senha no `.env` depois não altera a senha de um banco existente. A conta inicial tem privilégios de administrador para este ambiente local; a hospedagem terá configuração própria.
 
+## Execução local e rota de saúde
+
+Com a `.venv` ativa, as variáveis do `.env` carregadas e o PostgreSQL iniciado, execute:
+
+```bash
+python manage.py check
+python manage.py runserver 127.0.0.1:8000
+```
+
+No Bruno API Client, faça esta requisição:
+
+- Método: `GET`.
+- URL: `http://127.0.0.1:8000/api/saude/`.
+- Autenticação: nenhuma.
+- Header: `Accept: application/json`.
+- Corpo: nenhum.
+- Resposta: HTTP `200` com `{"status": "ok"}`.
+
+Essa rota confirma que a aplicação atende à requisição. Não consulta o banco, não grava dados e não faz chamadas externas; não verifica a disponibilidade do PostgreSQL nem a capacidade de entregar webhooks. A autenticação está desabilitada apenas nessa view. Um `POST` para a mesma URL retorna HTTP `405`, com a explicação no campo `detail`.
+
+O servidor desse comando é destinado ao desenvolvimento local. Encerre com `Ctrl+C`.
+
 ## Ferramentas de testes
 
-`pytest.ini` indica `config.settings` para inicializar Django e procura arquivos chamados `test_*.py`. Os testes serão escritos conforme os comportamentos da API forem implementados.
+`pytest.ini` indica `config.settings` para inicializar Django e procura arquivos chamados `test_*.py`. `tests/test_health.py` verifica GET sem autenticação, resposta JSON e rejeição de POST na rota de saúde. Novos testes serão escritos conforme os comportamentos da API forem implementados.
 
 Após instalar as dependências de desenvolvimento, confirme a instalação:
 
@@ -96,15 +118,15 @@ python -m pip check
 python -m pytest --version
 ```
 
-Quando existirem testes, execute com a `.venv` ativa, as variáveis do `.env` carregadas e o PostgreSQL disponível:
+Execute com a `.venv` ativa e as variáveis do `.env` carregadas:
 
 ```bash
 python -m pytest -q
 ```
 
-Ainda não há testes para executar; nesse estado, pytest informa que nenhum teste foi encontrado e encerra com código 5. Isso não é uma suíte aprovada. Nos testes que acessarem dados, pytest-django usará um banco de testes separado, criado no PostgreSQL local.
+Os testes atuais usam o cliente de testes do Django, sem servidor HTTP ativo e sem acesso ao banco. pytest-django bloqueia acesso ao banco nesses testes, que não solicitam essa permissão. Quando forem acrescentados testes que usam dados, mantenha PostgreSQL disponível: pytest-django usará um banco de testes separado, criado no PostgreSQL local. Nenhum teste encontrado (código 5) não significa aprovação.
 
-As instruções para iniciar a API e seus exemplos de uso serão acrescentados conforme a implementação avançar.
+Os exemplos dos endpoints de webhooks serão acrescentados conforme a implementação avançar.
 
 ## Licença
 

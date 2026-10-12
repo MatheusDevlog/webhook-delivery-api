@@ -2,8 +2,9 @@
 
 ## Fontes e escopo
 
-- Este repositório inicia o Webhook Delivery Service, terceiro projeto de portfólio. A estrutura padrão do Django foi gerada em manage.py e config/; ainda não há endpoints de webhooks, testes ou MVP concluído. Confira os arquivos antes de afirmar o que existe.
+- Este repositório inicia o Webhook Delivery Service, terceiro projeto de portfólio. A estrutura padrão do Django foi gerada em manage.py e config/; existe rota de saúde com testes em tests/test_health.py, mas ainda não há endpoints de webhooks ou MVP concluído. Confira os arquivos antes de afirmar o que existe.
 - O README.md é a referência pública do comportamento implementado e dos comandos de execução. Planos não são funcionalidades entregues.
+- GET /api/saude/ é a rota de saúde da aplicação em config/views.py: pública, sem autenticação, retorna status ok e não consulta banco nem serviços externos. Não interpretar seu sucesso como confirmação de disponibilidade do banco ou entrega de webhooks.
 - Consulte docs/CONTEXTO_DESENVOLVIMENTO.md para preferências privadas e docs/ESTADO_WEBHOOK_DELIVERY.md para o estado recente, quando disponíveis. Não copie esses documentos para commits ou PRs.
 - Inspecione o código e o estado do Git antes de presumir branches, testes, configuração ou publicação. Mantenha mudanças pequenas e relacionadas ao pedido.
 
@@ -39,7 +40,7 @@
 
 ## Verificação
 
-- pytest.ini define config.settings e descoberta de test_*.py. Usar pytest e pytest-django com PostgreSQL local, em banco de testes separado quando necessário. O comando é python -m pytest -q; ainda não há testes implementados nem execução de suíte verificada. Nenhum teste encontrado (código 5) não significa aprovação.
+- pytest.ini define config.settings e descoberta de test_*.py. O comando é python -m pytest -q. Os testes atuais de saúde não usam banco nem servidor HTTP ativo. Nos testes que exigirem banco, usar pytest-django com PostgreSQL local em banco separado. Não presumir execução ou aprovação sem evidência; nenhum teste encontrado (código 5) não significa aprovação.
 - Acrescente testes de comportamento a cada parte: sucesso, entradas inválidas, recurso inexistente, efeitos no banco, repetição e concorrência no envio, falhas HTTP/rede e restrições de destino.
 - Testes automatizados devem simular HTTP externo e DNS, sem depender de serviços públicos nem enviar dados reais. Testes de concorrência devem usar transações reais do PostgreSQL quando necessário.
 - manage.py check e verificações de migrations complementam os testes de comportamento.
