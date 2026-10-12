@@ -2,15 +2,16 @@
 
 ## Fontes e escopo
 
-- Este repositório inicia o Webhook Delivery Service, terceiro projeto de portfólio. Está em planejamento; não há aplicação, testes ou MVP concluído nesta etapa. Confira os arquivos antes de afirmar o que existe.
-- Quando existir, o README.md será a referência pública do comportamento implementado e dos comandos de execução. Planos não são funcionalidades entregues.
+- Este repositório inicia o Webhook Delivery Service, terceiro projeto de portfólio. A estrutura padrão do Django foi gerada em manage.py e config/; existe rota de saúde com testes em tests/test_health.py, mas ainda não há endpoints de webhooks ou MVP concluído. Confira os arquivos antes de afirmar o que existe.
+- O README.md é a referência pública do comportamento implementado e dos comandos de execução. Planos não são funcionalidades entregues.
+- GET /api/saude/ é a rota de saúde da aplicação em config/views.py: pública, sem autenticação, retorna status ok e não consulta banco nem serviços externos. Não interpretar seu sucesso como confirmação de disponibilidade do banco ou entrega de webhooks.
 - Consulte docs/CONTEXTO_DESENVOLVIMENTO.md para preferências privadas e docs/ESTADO_WEBHOOK_DELIVERY.md para o estado recente, quando disponíveis. Não copie esses documentos para commits ou PRs.
 - Inspecione o código e o estado do Git antes de presumir branches, testes, configuração ou publicação. Mantenha mudanças pequenas e relacionadas ao pedido.
 
 ## Direção técnica planejada
 
-- Stack proposta: Python, Django, Django REST Framework e PostgreSQL. Versões e dependências serão confirmadas na preparação do ambiente.
-- Planeja-se PostgreSQL em Docker Compose, API e testes no Python local da .venv. Ainda não existem serviços configurados nem comandos de execução validados.
+- Base atual: Python 3.14, Django 5.2, DRF 3.18 e psycopg 3.3, com dependências declaradas em requirements.txt. requirements-dev.txt inclui essas dependências e acrescenta pytest 9 e pytest-django 4; instalação conforme README.
+- compose.yaml define PostgreSQL 17 local, porta publicada no loopback e volume persistente. Django roda na .venv local; settings.py lê as variáveis POSTGRES_* do ambiente. Não presumir instalação, serviço iniciado ou migrations aplicadas sem evidência.
 - Hospedagem escolhida para a demonstração: Vercel Hobby para Django/DRF e interface simples, Neon Free para PostgreSQL. Validar um deploy mínimo e a conexão ao banco cedo; ainda não houve deploy. Verificar cotas e configuração dos planos gratuitos antes de publicar.
 - A demonstração deve executar requisições HTTP reais e persistir resultados, com dados fictícios e receptores controlados. Manter a interface pequena e servir a API e a interface no mesmo projeto quando possível.
 - MVP proposto: cadastrar destinos autorizados e seu tipo de evento, registrar um evento para um único destino, solicitar uma tentativa síncrona e consultar estado e tentativa. Não pressupor envio automático, fila ou múltiplos destinatários.
@@ -35,10 +36,11 @@
 - Persistir a tentativa antes da chamada externa e seu resultado depois. Evitar transação de banco aberta durante a chamada; impedir duas solicitações concorrentes de iniciar o mesmo evento.
 - Timeout não prova que o destinatário deixou de receber o evento. Não prometer entrega exatamente uma vez nem recuperar automaticamente envios de resultado incerto.
 - Mantenha docs/, .env, variantes locais de .env e .venv/ fora do versionamento. .env.example deve conter somente exemplos sem segredos.
+- A configuração atual lê DJANGO_SECRET_KEY do ambiente e usa DEBUG = True para desenvolvimento local. Carregue o .env no terminal conforme o README; o Django não o lê automaticamente. Ajustar as configurações antes de publicar.
 
 ## Verificação
 
-- Planejar pytest e pytest-django com PostgreSQL. O comando previsto é python -m pytest -q, após configurar o ambiente; ainda não foi executado neste projeto.
+- pytest.ini define config.settings e descoberta de test_*.py. O comando é python -m pytest -q. Os testes atuais de saúde não usam banco nem servidor HTTP ativo. Nos testes que exigirem banco, usar pytest-django com PostgreSQL local em banco separado. Não presumir execução ou aprovação sem evidência; nenhum teste encontrado (código 5) não significa aprovação.
 - Acrescente testes de comportamento a cada parte: sucesso, entradas inválidas, recurso inexistente, efeitos no banco, repetição e concorrência no envio, falhas HTTP/rede e restrições de destino.
 - Testes automatizados devem simular HTTP externo e DNS, sem depender de serviços públicos nem enviar dados reais. Testes de concorrência devem usar transações reais do PostgreSQL quando necessário.
 - manage.py check e verificações de migrations complementam os testes de comportamento.
