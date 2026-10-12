@@ -36,7 +36,7 @@
 - Persistir a tentativa antes da chamada externa e seu resultado depois. Evitar transação de banco aberta durante a chamada; impedir duas solicitações concorrentes de iniciar o mesmo evento.
 - Timeout não prova que o destinatário deixou de receber o evento. Não prometer entrega exatamente uma vez nem recuperar automaticamente envios de resultado incerto.
 - Mantenha docs/, .env, variantes locais de .env e .venv/ fora do versionamento. .env.example deve conter somente exemplos sem segredos.
-- A configuração atual lê DJANGO_SECRET_KEY do ambiente e usa DEBUG = True para desenvolvimento local. Carregue o .env no terminal conforme o README; o Django não o lê automaticamente. Ajustar as configurações antes de publicar.
+- A configuração lê DJANGO_SECRET_KEY, DJANGO_DEBUG e DJANGO_ALLOWED_HOSTS do ambiente. DEBUG só é ativado pelo texto exato True e fica desativado por padrão; ALLOWED_HOSTS é uma lista separada por vírgulas, vazia por padrão. O .env.example indica True e hosts locais para desenvolvimento. Na publicação, usar False e domínios específicos, sem wildcard; essa lista não autoriza destinos externos de webhooks. Carregue o .env no terminal conforme o README; o Django não o lê automaticamente. Ainda preparar as demais configurações antes de publicar.
 
 ## Verificação
 

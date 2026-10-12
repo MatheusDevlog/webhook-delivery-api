@@ -29,13 +29,22 @@ python -m pip install -r requirements-dev.txt
 
 `requirements.txt` declara Django, DRF e psycopg. `requirements-dev.txt` inclui esse arquivo e acrescenta pytest e pytest-django. Para executar a aplicação sem ferramentas de testes, instale somente `requirements.txt`.
 
-O arquivo `.env.example` mostra a variável necessária, sem uma chave real. Para criar um `.env` local com uma chave aleatória, execute uma única vez, quando o arquivo ainda não existir:
+O arquivo `.env.example` mostra as variáveis de configuração, sem segredos reais. Para criar um `.env` local com uma chave aleatória, execute uma única vez, quando o arquivo ainda não existir:
 
 ```bash
 python -c "from django.core.management.utils import get_random_secret_key; print('DJANGO_SECRET_KEY=' + repr(get_random_secret_key()))" > .env
 ```
 
 O comando grava a chave no `.env`, que fica fora do Git. Não compartilhe esse arquivo. A chave usada na hospedagem será gerada separadamente.
+
+Acrescente também estas opções ao `.env`, preservando as linhas existentes:
+
+```ini
+DJANGO_DEBUG=True
+DJANGO_ALLOWED_HOSTS=127.0.0.1,localhost
+```
+
+`DJANGO_DEBUG` ativa o modo de desenvolvimento somente com o texto exato `True`; sem a variável, o modo fica desativado. Na hospedagem, use `False`, pois páginas detalhadas de erro podem expor informações internas. `DJANGO_ALLOWED_HOSTS` contém os nomes de domínio ou IPs pelos quais esta aplicação aceita requisições, separados por vírgulas e sem protocolo, porta ou caminho. Sem a variável, a lista fica vazia. Na hospedagem, configure os domínios específicos da aplicação; não use `*`. Essa lista não autoriza destinos de webhooks.
 
 Acrescente ao `.env` as variáveis de PostgreSQL indicadas em `.env.example`, preservando sua chave Django. Substitua a senha de exemplo por uma senha local própria antes de iniciar o banco. `POSTGRES_HOST=127.0.0.1` é o endereço usado pelo Django que roda na máquina; `db` é o nome do serviço dentro do Compose.
 
@@ -75,7 +84,7 @@ python manage.py migrate
 python manage.py showmigrations
 ```
 
-`check` verifica a configuração; `migrate` conecta ao PostgreSQL e cria as tabelas dos componentes padrão do Django; `showmigrations` lista quais migrations estão aplicadas, com `[X]`. Ainda não há tabelas de webhooks nem testes de comportamento. `DEBUG = True` é a configuração atual para desenvolvimento local e precisa ser ajustada antes da publicação.
+`check` verifica a configuração; `migrate` conecta ao PostgreSQL e cria as tabelas dos componentes padrão do Django; `showmigrations` lista quais migrations estão aplicadas, com `[X]`. Ainda não há tabelas de webhooks; os testes de comportamento atuais cobrem somente a rota de saúde.
 
 Os dados ficam no volume `postgres_data`, gerenciado pelo Docker e separado dos arquivos versionados. Para parar e remover os containers preservando o volume:
 
@@ -94,7 +103,7 @@ python manage.py check
 python manage.py runserver 127.0.0.1:8000
 ```
 
-No Bruno API Client, faça esta requisição:
+No Bruno API Client, ferramenta para testar APIs, faça esta requisição:
 
 - Método: `GET`.
 - URL: `http://127.0.0.1:8000/api/saude/`.
@@ -109,7 +118,7 @@ O servidor desse comando é destinado ao desenvolvimento local. Encerre com `Ctr
 
 ## Ferramentas de testes
 
-`pytest.ini` indica `config.settings` para inicializar Django e procura arquivos chamados `test_*.py`. `tests/test_health.py` verifica GET sem autenticação, resposta JSON e rejeição de POST na rota de saúde. Novos testes serão escritos conforme os comportamentos da API forem implementados.
+`pytest.ini` indica `config.settings` para inicializar Django e procura arquivos chamados `test_*.py`. `tests/test_health.py` verifica GET sem autenticação, resposta JSON e rejeição de POST na rota de saúde. Também verifica, com `DEBUG = False` e uma lista explícita de hosts, a aceitação de um host autorizado e a rejeição de outro com HTTP `400`. Essa rejeição é feita pelo Django e não precisa ter corpo JSON, mesmo quando a requisição pede JSON. Novos testes serão escritos conforme os comportamentos da API forem implementados.
 
 Após instalar as dependências de desenvolvimento, confirme a instalação:
 
