@@ -86,7 +86,10 @@ DATABASES = {
         'PASSWORD': os.environ['POSTGRES_PASSWORD'],
         'HOST': os.environ.get('POSTGRES_HOST', '127.0.0.1'),
         'PORT': os.environ.get('POSTGRES_PORT', '5432'),
-        'OPTIONS': {'connect_timeout': 5},
+        'OPTIONS': {
+            'connect_timeout': 5,
+            'sslmode': os.environ.get('POSTGRES_SSLMODE', 'require'),
+        },
     }
 }
 

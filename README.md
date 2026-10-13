@@ -48,6 +48,8 @@ DJANGO_ALLOWED_HOSTS=127.0.0.1,localhost
 
 Acrescente ao `.env` as variáveis de PostgreSQL indicadas em `.env.example`, preservando sua chave Django. Substitua a senha de exemplo por uma senha local própria antes de iniciar o banco. `POSTGRES_HOST=127.0.0.1` é o endereço usado pelo Django que roda na máquina; `db` é o nome do serviço dentro do Compose.
 
+Inclua `POSTGRES_SSLMODE=disable` para conectar ao PostgreSQL local deste Compose, que não tem SSL configurado. A opção controla a conexão Django–PostgreSQL. Sem a variável, a aplicação usa `require`, que exige uma conexão criptografada e recusa servidores sem SSL; use esse valor para o Neon. Não use `disable` para o banco hospedado. Essa opção não configura o HTTPS da API nem das entregas de webhooks.
+
 Para gerar essa senha local:
 
 ```bash
