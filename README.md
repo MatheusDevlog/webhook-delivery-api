@@ -6,14 +6,16 @@ Projeto de backend para registrar eventos, enviar webhooks a destinos autorizado
 
 A estrutura padrão do Django foi gerada e configurada para PostgreSQL local em Docker Compose. O Django REST Framework está registrado e as ferramentas de testes estão declaradas. Existe uma rota de saúde da aplicação com testes automatizados escritos. Os endpoints de webhooks ainda não foram implementados; a demonstração ainda não foi publicada.
 
+A conexão ao PostgreSQL no Neon foi verificada com criptografia exigida e as migrations padrão do Django foram aplicadas nesse banco. A preparação do banco hospedado está documentada abaixo.
+
 O MVP planejado terá uma tentativa síncrona por evento, registro do resultado HTTP e consulta do estado. A demonstração usará dados fictícios e receptores controlados.
 
-## Stack planejada
+## Tecnologias
 
 - Python, Django e Django REST Framework.
 - PostgreSQL, com Docker Compose no desenvolvimento local.
 - pytest e pytest-django para testes.
-- Vercel Hobby para a aplicação e Neon Free para o banco da demonstração.
+- Neon Free para o banco da demonstração e Vercel Hobby para a publicação planejada da aplicação.
 
 ## Preparação local da base
 
@@ -48,7 +50,7 @@ DJANGO_ALLOWED_HOSTS=127.0.0.1,localhost
 
 Acrescente ao `.env` as variáveis de PostgreSQL indicadas em `.env.example`, preservando sua chave Django. Substitua a senha de exemplo por uma senha local própria antes de iniciar o banco. `POSTGRES_HOST=127.0.0.1` é o endereço usado pelo Django que roda na máquina; `db` é o nome do serviço dentro do Compose.
 
-Inclua `POSTGRES_SSLMODE=disable` para conectar ao PostgreSQL local deste Compose, que não tem SSL configurado. A opção controla a conexão Django–PostgreSQL. Sem a variável, a aplicação usa `require`, que exige uma conexão criptografada e recusa servidores sem SSL; use esse valor para o Neon. Não use `disable` para o banco hospedado. Essa opção não configura o HTTPS da API nem das entregas de webhooks.
+Inclua `POSTGRES_SSLMODE=disable` para conectar ao PostgreSQL local deste Compose, que não tem SSL/TLS configurado. A opção controla a conexão Django–PostgreSQL. Sem a variável, a aplicação usa `require`, que exige uma conexão criptografada; use esse valor para o Neon, cuja conexão usa TLS. SSL é o antecessor do TLS; o nome `sslmode` foi mantido na configuração do PostgreSQL. Não use `disable` para o banco hospedado. Essa opção não configura o HTTPS da API nem das entregas de webhooks.
 
 Para gerar essa senha local:
 
@@ -95,6 +97,44 @@ docker compose down
 ```
 
 As credenciais e o banco definidos na imagem oficial são criados na primeira inicialização de um volume vazio. Alterar a senha no `.env` depois não altera a senha de um banco existente. A conta inicial tem privilégios de administrador para este ambiente local; a hospedagem terá configuração própria.
+
+## Preparação do banco hospedado no Neon
+
+Crie um projeto no Neon Free com PostgreSQL 17. A preparação foi feita na região AWS US East (N. Virginia). No painel, abra **Connect**, selecione o banco e o **Role** (usuário do PostgreSQL) da branch desejada e desative **Connection pooling** para obter a conexão direta usada nesta etapa. [Instruções oficiais de conexão](https://neon.com/docs/connect/connect-from-any-app).
+
+Mantenha o `.env` local e crie um arquivo separado `.env.neon`, contendo somente as opções do banco hospedado:
+
+```ini
+POSTGRES_DB='nome-do-seu-banco'
+POSTGRES_USER='usuario-do-seu-banco'
+POSTGRES_PASSWORD='senha-do-seu-banco'
+POSTGRES_HOST='host-direto-do-seu-banco'
+POSTGRES_PORT=5432
+POSTGRES_SSLMODE=require
+```
+
+Substitua os exemplos pelos valores exatos do painel. Hífen e sublinhado não são equivalentes no nome do usuário. O host deve ficar em uma linha, sem protocolo, porta, caminho ou parâmetros da URL. A senha é a do usuário do banco, não a da conta no site Neon. `.env.neon` é ignorado pelo Git e não deve ser compartilhado.
+
+Na raiz do projeto, com a `.venv` ativa e o `.env` local já preparado, consulte o banco, aplique as migrations e confira o resultado:
+
+```bash
+(
+    set -e
+    set -a
+    source .env
+    source .env.neon
+    set +a
+    POSTGRES_SSLMODE=require python manage.py showmigrations
+    POSTGRES_SSLMODE=require python manage.py migrate
+    POSTGRES_SSLMODE=require python manage.py showmigrations
+)
+```
+
+O `.env` fornece a chave e as opções do Django; `.env.neon` sobrescreve as opções do banco nesse bloco. Os parênteses criam um subshell: ao terminar, essas substituições não permanecem no terminal principal. `set -e` interrompe o bloco se houver falha. Carregue somente arquivos que você próprio preparou, pois `source` interpreta seu conteúdo como comandos do shell.
+
+Em um banco novo, as migrations aparecem com `[ ]` antes da aplicação e `[X]` depois. Cada banco mantém seu próprio registro; migrar localmente não migra o Neon. Os mesmos arquivos de migration são aplicados em cada ambiente, e `migrate` executa apenas os pendentes. A aplicação de migrations no Neon é manual nesta etapa; ainda não há automação de CI/CD.
+
+Use `.env` para desenvolvimento, Compose e testes locais. A chave Django usada nessa preparação local do banco será substituída por uma chave própria quando a aplicação for publicada. O sucesso dessa preparação verifica a conexão e as migrations do banco hospedado; a aplicação ainda não foi publicada na Vercel.
 
 ## Execução local e rota de saúde
 
