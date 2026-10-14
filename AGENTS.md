@@ -11,7 +11,7 @@
 ## Direção técnica planejada
 
 - Base atual: Python 3.14, Django 5.2, DRF 3.18 e psycopg 3.3, com dependências declaradas em requirements.txt. requirements-dev.txt inclui essas dependências e acrescenta pytest 9 e pytest-django 4; instalação conforme README.
-- compose.yaml define PostgreSQL 17 local, porta publicada no loopback e volume persistente. Django roda na .venv local; settings.py lê as variáveis POSTGRES_* do ambiente. Não presumir instalação, serviço iniciado ou migrations aplicadas sem evidência.
+- compose.yaml define PostgreSQL 17 local, porta publicada no loopback e volume persistente. Django roda na .venv local; settings.py lê as variáveis POSTGRES_* do ambiente. POSTGRES_SSLMODE é repassado ao driver, com require por padrão para exigir criptografia; o exemplo local usa disable porque o Compose não configura SSL. Na conexão ao Neon, usar require. Não presumir instalação, serviço iniciado ou migrations aplicadas sem evidência.
 - Hospedagem escolhida para a demonstração: Vercel Hobby para Django/DRF e interface simples, Neon Free para PostgreSQL. Validar um deploy mínimo e a conexão ao banco cedo; ainda não houve deploy. Verificar cotas e configuração dos planos gratuitos antes de publicar.
 - A demonstração deve executar requisições HTTP reais e persistir resultados, com dados fictícios e receptores controlados. Manter a interface pequena e servir a API e a interface no mesmo projeto quando possível.
 - MVP proposto: cadastrar destinos autorizados e seu tipo de evento, registrar um evento para um único destino, solicitar uma tentativa síncrona e consultar estado e tentativa. Não pressupor envio automático, fila ou múltiplos destinatários.
@@ -23,6 +23,7 @@
 
 - Prefira recursos do Django e do DRF. Validação de entrada no serializer, coordenação HTTP na view, persistência nos models e envio externo em funções próprias.
 - Use comandos oficiais para estruturas padrão e migrations. Gere migrations quando o esquema mudar e revise antes de aplicar.
+- STATIC_URL é /static/ e STATIC_ROOT aponta para staticfiles/ na raiz, pasta gerada e ignorada pelo Git. Verificar coleta com manage.py collectstatic --noinput. A Vercel coleta automaticamente quando STATIC_ROOT está definido; verificar entrega HTTP dos arquivos após deploy, sem presumir sucesso pela coleta local.
 - Use inglês claro nos identificadores Python, aspas simples por padrão e português nas mensagens ao usuário e na documentação. Preserve nomes exigidos pelo framework e contratos já publicados.
 - Atualize o README quando o contrato HTTP, a configuração ou a execução real mudar. Não documente planos como comportamento disponível.
 
@@ -36,7 +37,7 @@
 - Persistir a tentativa antes da chamada externa e seu resultado depois. Evitar transação de banco aberta durante a chamada; impedir duas solicitações concorrentes de iniciar o mesmo evento.
 - Timeout não prova que o destinatário deixou de receber o evento. Não prometer entrega exatamente uma vez nem recuperar automaticamente envios de resultado incerto.
 - Mantenha docs/, .env, variantes locais de .env e .venv/ fora do versionamento. .env.example deve conter somente exemplos sem segredos.
-- A configuração atual lê DJANGO_SECRET_KEY do ambiente e usa DEBUG = True para desenvolvimento local. Carregue o .env no terminal conforme o README; o Django não o lê automaticamente. Ajustar as configurações antes de publicar.
+- A configuração lê DJANGO_SECRET_KEY, DJANGO_DEBUG e DJANGO_ALLOWED_HOSTS do ambiente. DEBUG só é ativado pelo texto exato True e fica desativado por padrão; ALLOWED_HOSTS é uma lista separada por vírgulas, vazia por padrão. O .env.example indica True e hosts locais para desenvolvimento. Na publicação, usar False e domínios específicos, sem wildcard; essa lista não autoriza destinos externos de webhooks. Carregue o .env no terminal conforme o README; o Django não o lê automaticamente. Ainda preparar as demais configurações antes de publicar.
 
 ## Verificação
 

@@ -8,5 +8,6 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
+/staticfiles/
 media/
 *.sqlite3
