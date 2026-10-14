@@ -158,6 +158,24 @@ Essa rota confirma que a aplicação atende à requisição. Não consulta o ban
 
 O servidor desse comando é destinado ao desenvolvimento local. Encerre com `Ctrl+C`.
 
+## Arquivos estáticos
+
+`STATIC_URL = '/static/'` define o caminho de acesso aos arquivos estáticos, como CSS, JavaScript e imagens. `STATIC_ROOT` aponta para `staticfiles/`, na raiz, onde o comando oficial `collectstatic` reúne cópias dos arquivos das aplicações instaladas, incluindo Django admin e DRF. Essa pasta é gerada e ignorada pelo Git; os arquivos de origem permanecem nas aplicações.
+
+Na raiz do projeto, com a `.venv` ativa, carregue a configuração local e verifique a coleta:
+
+```bash
+set -a
+source .env
+set +a
+python manage.py check
+python manage.py collectstatic --noinput
+```
+
+O comando deve informar a quantidade de arquivos coletados ou já presentes. Confira, por exemplo, `staticfiles/admin/css/base.css` e `staticfiles/rest_framework/css/bootstrap.min.css`. Essa preparação não consulta o banco nem aplica migrations.
+
+Com `STATIC_ROOT` configurado, a Vercel executa a coleta automaticamente durante a preparação da publicação e distribui os arquivos em `STATIC_URL`. [Suporte oficial a arquivos estáticos do Django](https://vercel.com/docs/frameworks/full-stack/django#serving-static-assets). A coleta local verifica a configuração; a entrega HTTP dos arquivos na Vercel será verificada depois do deploy.
+
 ## Ferramentas de testes
 
 `pytest.ini` indica `config.settings` para inicializar Django e procura arquivos chamados `test_*.py`. `tests/test_health.py` verifica GET sem autenticação, resposta JSON e rejeição de POST na rota de saúde. Também verifica, com `DEBUG = False` e uma lista explícita de hosts, a aceitação de um host autorizado e a rejeição de outro com HTTP `400`. Essa rejeição é feita pelo Django e não precisa ter corpo JSON, mesmo quando a requisição pede JSON. Novos testes serão escritos conforme os comportamentos da API forem implementados.

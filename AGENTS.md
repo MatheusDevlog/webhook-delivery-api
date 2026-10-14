@@ -23,6 +23,7 @@
 
 - Prefira recursos do Django e do DRF. Validação de entrada no serializer, coordenação HTTP na view, persistência nos models e envio externo em funções próprias.
 - Use comandos oficiais para estruturas padrão e migrations. Gere migrations quando o esquema mudar e revise antes de aplicar.
+- STATIC_URL é /static/ e STATIC_ROOT aponta para staticfiles/ na raiz, pasta gerada e ignorada pelo Git. Verificar coleta com manage.py collectstatic --noinput. A Vercel coleta automaticamente quando STATIC_ROOT está definido; verificar entrega HTTP dos arquivos após deploy, sem presumir sucesso pela coleta local.
 - Use inglês claro nos identificadores Python, aspas simples por padrão e português nas mensagens ao usuário e na documentação. Preserve nomes exigidos pelo framework e contratos já publicados.
 - Atualize o README quando o contrato HTTP, a configuração ou a execução real mudar. Não documente planos como comportamento disponível.
 
