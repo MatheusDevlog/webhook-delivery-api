@@ -21,6 +21,8 @@ O MVP planejado terá uma tentativa síncrona por evento, registro do resultado 
 
 A base foi gerada com Python 3.14 e Django 5.2.18. O banco local usa a imagem oficial PostgreSQL 17. Tenha Docker com Compose disponível e execute os comandos na raiz do repositório.
 
+`.python-version`, na raiz, declara Python 3.14 para a Vercel usar essa mesma versão principal e secundária na publicação. O arquivo não instala Python nem modifica uma `.venv` existente; confira a versão local com `python --version` após ativar o ambiente. [Configuração oficial da versão Python na Vercel](https://vercel.com/docs/functions/runtimes/python/python-version).
+
 Crie e ative o ambiente virtual, depois instale as dependências de desenvolvimento:
 
 ```bash
