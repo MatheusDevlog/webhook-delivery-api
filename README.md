@@ -62,9 +62,12 @@ Acrescente também estas opções ao `.env`, preservando as linhas existentes:
 ```ini
 DJANGO_DEBUG=True
 DJANGO_ALLOWED_HOSTS=127.0.0.1,localhost
+DJANGO_SECURE_COOKIES=False
 ```
 
 `DJANGO_DEBUG` ativa o modo de desenvolvimento somente com o texto exato `True`; sem a variável, o modo fica desativado. Na hospedagem, use `False`, pois páginas detalhadas de erro podem expor informações internas. `DJANGO_ALLOWED_HOSTS` contém os nomes de domínio ou IPs pelos quais esta aplicação aceita requisições, separados por vírgulas e sem protocolo, porta ou caminho. Sem a variável, a lista fica vazia. Na hospedagem, configure os domínios específicos da aplicação; não use `*`. Essa lista não autoriza destinos de webhooks.
+
+`DJANGO_SECURE_COOKIES` controla `SESSION_COOKIE_SECURE` e `CSRF_COOKIE_SECURE`. Por padrão, ambos ficam ativados: os cookies recebem o atributo `Secure`, restringindo seu envio a HTTPS. Somente o texto exato `False` desativa essa opção, como no desenvolvimento local por HTTP. Na hospedagem HTTPS, mantenha `True` ou omita a variável. A escolha é independente de `DEBUG`; não copie a opção local `False` para a Vercel.
 
 Acrescente ao `.env` as variáveis de PostgreSQL indicadas em `.env.example`, preservando sua chave Django. Substitua a senha de exemplo por uma senha local própria antes de iniciar o banco. `POSTGRES_HOST=127.0.0.1` é o endereço usado pelo Django que roda na máquina; `db` é o nome do serviço dentro do Compose.
 
@@ -175,6 +178,14 @@ No Bruno API Client, ferramenta para testar APIs, faça esta requisição:
 Essa rota confirma que a aplicação atende à requisição. Não consulta o banco, não grava dados e não faz chamadas externas; não verifica a disponibilidade do PostgreSQL nem a capacidade de entregar webhooks. A view de saúde é deliberadamente pública e desabilita a autenticação. Isso não define a política de acesso dos futuros endpoints de webhooks, que ainda será implementada. Um `POST` para a mesma URL retorna HTTP `405`, com a explicação no campo `detail`.
 
 O servidor desse comando é destinado ao desenvolvimento local. Encerre com `Ctrl+C`.
+
+## HTTPS e cookies na publicação
+
+A Vercel fornece o redirecionamento HTTP para HTTPS e o HSTS do domínio `.vercel.app`. Foram observados o status `308` com `Location` apontando à mesma rota de saúde em HTTPS e o header `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`. Esses controles ficam na hospedagem; não são ativados novamente no Django nesta configuração. [Documentação da Vercel](https://vercel.com/docs/cdn-security/encryption).
+
+O Django configura os atributos dos cookies de sessão e CSRF conforme `DJANGO_SECURE_COOKIES`. Essa alteração passa a valer na Vercel quando o código atualizado for publicado; a verificação dos cookies na publicação ainda está pendente. A configuração não cria um login próprio da API nem muda o acesso público à saúde.
+
+O comando `python manage.py check --deploy` verifica configurações locais do Django. Os avisos `security.W004` e `security.W008` podem continuar porque ele não inspeciona o HSTS e o redirecionamento fornecidos pela Vercel. Nesta hospedagem, esses comportamentos devem ser verificados nas respostas públicas. Ao trocar de hospedagem, reavalie onde esses controles serão aplicados. Não há avisos silenciados nesta configuração.
 
 ## Arquivos estáticos
 
