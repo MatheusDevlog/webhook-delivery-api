@@ -32,6 +32,9 @@ ALLOWED_HOSTS = [
     if host.strip()
 ]
 
+SESSION_COOKIE_SECURE = os.environ.get('DJANGO_SECURE_COOKIES', 'True') != 'False'
+CSRF_COOKIE_SECURE = SESSION_COOKIE_SECURE
+
 
 # Application definition
 

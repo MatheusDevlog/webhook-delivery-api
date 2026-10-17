@@ -4,9 +4,9 @@ Projeto de backend para registrar eventos, enviar webhooks a destinos autorizado
 
 ## Estado atual
 
-A estrutura padrão do Django foi gerada e configurada para PostgreSQL local em Docker Compose. O Django REST Framework está registrado e as ferramentas de testes estão declaradas. Existe uma rota de saúde da aplicação com testes automatizados escritos. Os endpoints de webhooks ainda não foram implementados; a demonstração ainda não foi publicada.
+A estrutura padrão do Django foi gerada e configurada para PostgreSQL local em Docker Compose. O Django REST Framework está registrado e existe uma rota de saúde com testes automatizados. A base está publicada na Vercel; os endpoints de webhooks e a demonstração interativa ainda não foram implementados.
 
-A conexão ao PostgreSQL no Neon foi verificada com criptografia exigida e as migrations padrão do Django foram aplicadas nesse banco. A preparação do banco hospedado está documentada abaixo.
+A conexão ao PostgreSQL no Neon foi verificada pelo terminal com criptografia exigida e as migrations padrão do Django foram aplicadas nesse banco. A consulta ao banco pela aplicação executada na Vercel também foi verificada pelo fluxo de autenticação do admin. A preparação do banco hospedado está documentada abaixo.
 
 O MVP planejado terá uma tentativa síncrona por evento, registro do resultado HTTP e consulta do estado. A demonstração usará dados fictícios e receptores controlados.
 
@@ -15,7 +15,25 @@ O MVP planejado terá uma tentativa síncrona por evento, registro do resultado 
 - Python, Django e Django REST Framework.
 - PostgreSQL, com Docker Compose no desenvolvimento local.
 - pytest e pytest-django para testes.
-- Neon Free para o banco da demonstração e Vercel Hobby para a publicação planejada da aplicação.
+- Neon Free para o banco hospedado e Vercel Hobby para a publicação inicial da aplicação.
+
+## Base publicada
+
+Acesse a [rota de saúde publicada](https://webhook-delivery-api.vercel.app/api/saude/). No navegador, a interface padrão do DRF apresenta a resposta HTTP `200` com o conteúdo:
+
+```json
+{"status": "ok"}
+```
+
+Para consultar pelo Bruno API Client, ferramenta para testar APIs, use `GET` nessa mesma URL, sem autenticação e sem corpo, com o header `Accept: application/json`. A resposta será JSON. `POST` nessa rota retorna `405`.
+
+A saúde pública foi verificada no navegador. Ela confirma que a aplicação responde, sem consultar o banco nem realizar envios externos. O endereço `/` ainda não possui página inicial. Este link permite explorar a base publicada; o fluxo de webhooks ainda está em desenvolvimento.
+
+A publicação usa variáveis configuradas na Vercel em **Production**: chave Django própria, `DJANGO_DEBUG=False`, `DJANGO_ALLOWED_HOSTS=webhook-delivery-api.vercel.app` e as opções `POSTGRES_*` do Neon, com `POSTGRES_SSLMODE=require`. Senhas e chaves não são versionadas. O ambiente **Preview** ainda não foi preparado.
+
+Em 17/10/2026, uma tentativa de login no admin publicado com dados fictícios retornou a mensagem padrão de credenciais inválidas. Na configuração padrão usada aqui, essa resposta ocorre após consultar o usuário no banco: confirma uma leitura pela aplicação hospedada, sem comprovar login autorizado ou gravação de dados. Apenas abrir o formulário não seria suficiente.
+
+A revisão de segurança continua, incluindo a publicação e a verificação dos atributos dos cookies. O sucesso da saúde não substitui essas verificações.
 
 ## Preparação local da base
 
@@ -46,9 +64,12 @@ Acrescente também estas opções ao `.env`, preservando as linhas existentes:
 ```ini
 DJANGO_DEBUG=True
 DJANGO_ALLOWED_HOSTS=127.0.0.1,localhost
+DJANGO_SECURE_COOKIES=False
 ```
 
 `DJANGO_DEBUG` ativa o modo de desenvolvimento somente com o texto exato `True`; sem a variável, o modo fica desativado. Na hospedagem, use `False`, pois páginas detalhadas de erro podem expor informações internas. `DJANGO_ALLOWED_HOSTS` contém os nomes de domínio ou IPs pelos quais esta aplicação aceita requisições, separados por vírgulas e sem protocolo, porta ou caminho. Sem a variável, a lista fica vazia. Na hospedagem, configure os domínios específicos da aplicação; não use `*`. Essa lista não autoriza destinos de webhooks.
+
+`DJANGO_SECURE_COOKIES` controla `SESSION_COOKIE_SECURE` e `CSRF_COOKIE_SECURE`. Por padrão, ambos ficam ativados: os cookies recebem o atributo `Secure`, restringindo seu envio a HTTPS. Somente o texto exato `False` desativa essa opção, como no desenvolvimento local por HTTP. Na hospedagem HTTPS, mantenha `True` ou omita a variável. A escolha é independente de `DEBUG`; não copie a opção local `False` para a Vercel.
 
 Acrescente ao `.env` as variáveis de PostgreSQL indicadas em `.env.example`, preservando sua chave Django. Substitua a senha de exemplo por uma senha local própria antes de iniciar o banco. `POSTGRES_HOST=127.0.0.1` é o endereço usado pelo Django que roda na máquina; `db` é o nome do serviço dentro do Compose.
 
@@ -136,7 +157,7 @@ O `.env` fornece a chave e as opções do Django; `.env.neon` sobrescreve as op�
 
 Em um banco novo, as migrations aparecem com `[ ]` antes da aplicação e `[X]` depois. Cada banco mantém seu próprio registro; migrar localmente não migra o Neon. Os mesmos arquivos de migration são aplicados em cada ambiente, e `migrate` executa apenas os pendentes. A aplicação de migrations no Neon é manual nesta etapa; ainda não há automação de CI/CD.
 
-Use `.env` para desenvolvimento, Compose e testes locais. A chave Django usada nessa preparação local do banco será substituída por uma chave própria quando a aplicação for publicada. O sucesso dessa preparação verifica a conexão e as migrations do banco hospedado; a aplicação ainda não foi publicada na Vercel.
+Use `.env` para desenvolvimento, Compose e testes locais. A publicação na Vercel usa uma chave Django própria, diferente da local. O sucesso dessa preparação verifica a conexão do terminal ao banco hospedado e suas migrations; não verifica a conexão da execução na Vercel ao Neon.
 
 ## Execução local e rota de saúde
 
@@ -156,9 +177,17 @@ No Bruno API Client, ferramenta para testar APIs, faça esta requisição:
 - Corpo: nenhum.
 - Resposta: HTTP `200` com `{"status": "ok"}`.
 
-Essa rota confirma que a aplicação atende à requisição. Não consulta o banco, não grava dados e não faz chamadas externas; não verifica a disponibilidade do PostgreSQL nem a capacidade de entregar webhooks. A autenticação está desabilitada apenas nessa view. Um `POST` para a mesma URL retorna HTTP `405`, com a explicação no campo `detail`.
+Essa rota confirma que a aplicação atende à requisição. Não consulta o banco, não grava dados e não faz chamadas externas; não verifica a disponibilidade do PostgreSQL nem a capacidade de entregar webhooks. A view de saúde é deliberadamente pública e desabilita a autenticação. Isso não define a política de acesso dos futuros endpoints de webhooks, que ainda será implementada. Um `POST` para a mesma URL retorna HTTP `405`, com a explicação no campo `detail`.
 
 O servidor desse comando é destinado ao desenvolvimento local. Encerre com `Ctrl+C`.
+
+## HTTPS e cookies na publicação
+
+A Vercel fornece o redirecionamento HTTP para HTTPS e o HSTS do domínio `.vercel.app`. Foram observados o status `308` com `Location` apontando à mesma rota de saúde em HTTPS e o header `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`. Esses controles ficam na hospedagem; não são ativados novamente no Django nesta configuração. [Documentação da Vercel](https://vercel.com/docs/cdn-security/encryption).
+
+O Django configura os atributos dos cookies de sessão e CSRF conforme `DJANGO_SECURE_COOKIES`. Essa alteração passa a valer na Vercel quando o código atualizado for publicado; a verificação dos cookies na publicação ainda está pendente. A configuração não cria um login próprio da API nem muda o acesso público à saúde.
+
+O comando `python manage.py check --deploy` verifica configurações locais do Django. Os avisos `security.W004` e `security.W008` podem continuar porque ele não inspeciona o HSTS e o redirecionamento fornecidos pela Vercel. Nesta hospedagem, esses comportamentos devem ser verificados nas respostas públicas. Ao trocar de hospedagem, reavalie onde esses controles serão aplicados. Não há avisos silenciados nesta configuração.
 
 ## Arquivos estáticos
 
@@ -176,7 +205,7 @@ python manage.py collectstatic --noinput
 
 O comando deve informar a quantidade de arquivos coletados ou já presentes. Confira, por exemplo, `staticfiles/admin/css/base.css` e `staticfiles/rest_framework/css/bootstrap.min.css`. Essa preparação não consulta o banco nem aplica migrations.
 
-Com `STATIC_ROOT` configurado, a Vercel executa a coleta automaticamente durante a preparação da publicação e distribui os arquivos em `STATIC_URL`. [Suporte oficial a arquivos estáticos do Django](https://vercel.com/docs/frameworks/full-stack/django#serving-static-assets). A coleta local verifica a configuração; a entrega HTTP dos arquivos na Vercel será verificada depois do deploy.
+Com `STATIC_ROOT` configurado, a Vercel executa a coleta automaticamente durante a preparação da publicação e distribui os arquivos em `STATIC_URL`. [Suporte oficial a arquivos estáticos do Django](https://vercel.com/docs/frameworks/full-stack/django#serving-static-assets). A coleta local foi verificada, os logs de build confirmam a execução de `collectstatic` e as páginas publicadas do DRF e do admin foram visualizadas com estilos. As respostas HTTP dos arquivos individuais ainda não foram inspecionadas.
 
 ## Ferramentas de testes
 
