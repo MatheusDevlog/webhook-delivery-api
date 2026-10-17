@@ -6,7 +6,7 @@ Projeto de backend para registrar eventos, enviar webhooks a destinos autorizado
 
 A estrutura padrão do Django foi gerada e configurada para PostgreSQL local em Docker Compose. O Django REST Framework está registrado e existe uma rota de saúde com testes automatizados. A base está publicada na Vercel; os endpoints de webhooks e a demonstração interativa ainda não foram implementados.
 
-A conexão ao PostgreSQL no Neon foi verificada pelo terminal com criptografia exigida e as migrations padrão do Django foram aplicadas nesse banco. A conexão da aplicação executada na Vercel ao Neon ainda precisa ser verificada. A preparação do banco hospedado está documentada abaixo.
+A conexão ao PostgreSQL no Neon foi verificada pelo terminal com criptografia exigida e as migrations padrão do Django foram aplicadas nesse banco. A consulta ao banco pela aplicação executada na Vercel também foi verificada pelo fluxo de autenticação do admin. A preparação do banco hospedado está documentada abaixo.
 
 O MVP planejado terá uma tentativa síncrona por evento, registro do resultado HTTP e consulta do estado. A demonstração usará dados fictícios e receptores controlados.
 
@@ -31,7 +31,9 @@ A saúde pública foi verificada no navegador. Ela confirma que a aplicação re
 
 A publicação usa variáveis configuradas na Vercel em **Production**: chave Django própria, `DJANGO_DEBUG=False`, `DJANGO_ALLOWED_HOSTS=webhook-delivery-api.vercel.app` e as opções `POSTGRES_*` do Neon, com `POSTGRES_SSLMODE=require`. Senhas e chaves não são versionadas. O ambiente **Preview** ainda não foi preparado.
 
-A revisão das configurações de segurança da publicação e a verificação da conexão Vercel–Neon estão em andamento. O sucesso da saúde não conclui essas verificações.
+Em 17/10/2026, uma tentativa de login no admin publicado com dados fictícios retornou a mensagem padrão de credenciais inválidas. Na configuração padrão usada aqui, essa resposta ocorre após consultar o usuário no banco: confirma uma leitura pela aplicação hospedada, sem comprovar login autorizado ou gravação de dados. Apenas abrir o formulário não seria suficiente.
+
+A revisão de segurança continua, incluindo a publicação e a verificação dos atributos dos cookies. O sucesso da saúde não substitui essas verificações.
 
 ## Preparação local da base
 
@@ -203,7 +205,7 @@ python manage.py collectstatic --noinput
 
 O comando deve informar a quantidade de arquivos coletados ou já presentes. Confira, por exemplo, `staticfiles/admin/css/base.css` e `staticfiles/rest_framework/css/bootstrap.min.css`. Essa preparação não consulta o banco nem aplica migrations.
 
-Com `STATIC_ROOT` configurado, a Vercel executa a coleta automaticamente durante a preparação da publicação e distribui os arquivos em `STATIC_URL`. [Suporte oficial a arquivos estáticos do Django](https://vercel.com/docs/frameworks/full-stack/django#serving-static-assets). A coleta local foi verificada e a página publicada do DRF foi visualizada com estilos. A inspeção dos logs da coleta e das respostas HTTP dos arquivos individuais ainda está pendente.
+Com `STATIC_ROOT` configurado, a Vercel executa a coleta automaticamente durante a preparação da publicação e distribui os arquivos em `STATIC_URL`. [Suporte oficial a arquivos estáticos do Django](https://vercel.com/docs/frameworks/full-stack/django#serving-static-assets). A coleta local foi verificada, os logs de build confirmam a execução de `collectstatic` e as páginas publicadas do DRF e do admin foram visualizadas com estilos. As respostas HTTP dos arquivos individuais ainda não foram inspecionadas.
 
 ## Ferramentas de testes
 
