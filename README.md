@@ -33,9 +33,66 @@ A publicação usa variáveis configuradas na Vercel em **Production**: chave Dj
 
 Em 17/10/2026, uma tentativa de login no admin publicado com dados fictícios retornou a mensagem padrão de credenciais inválidas. Na configuração padrão usada aqui, essa resposta ocorre após consultar o usuário no banco: confirma uma leitura pela aplicação hospedada, sem comprovar login autorizado ou gravação de dados. Apenas abrir o formulário não seria suficiente.
 
-A revisão de segurança continua, incluindo a publicação e a verificação dos atributos dos cookies. O sucesso da saúde não substitui essas verificações.
+Após a publicação da PR #3, a saúde e o login do admin retornaram `200`, e a resposta do login apresentou o cookie `csrftoken` com o atributo `Secure`. O cookie de sessão ainda não foi observado em acesso autenticado. O sucesso da saúde não substitui verificações de segurança nem de acesso ao banco.
 
-## Preparação local da base
+## Imagem Docker para desenvolvimento
+
+O `Dockerfile` descreve uma imagem local com Python 3.14, código da aplicação e dependências de `requirements-dev.txt`, incluindo as ferramentas de testes. A base é a imagem oficial `python:3.14-slim-bookworm`, com Debian e Python; `slim` indica uma variante menor, com menos pacotes do sistema. Não é necessário copiar a `.venv` da máquina.
+
+Na raiz do repositório, com Docker disponível, construa a imagem:
+
+```bash
+docker build -t webhook-delivery-api:dev .
+```
+
+`-t` dá nome e etiqueta à imagem; `.` indica a pasta atual como origem dos arquivos da construção. O Docker lê o `Dockerfile` e aplica o `.dockerignore` antes de enviar esses arquivos à construção. A primeira execução precisa baixar a imagem base e as dependências.
+
+O `.dockerignore` exclui `.env`, `.env.neon`, `.venv/`, `docs/`, histórico Git e arquivos gerados. `.env.example` continua permitido por conter somente exemplos públicos. Configurações e credenciais reais deverão ser fornecidas ao executar o container, sem serem gravadas na imagem. O `.gitignore` e o `.dockerignore` controlam ferramentas diferentes; ignorar um arquivo no Git não o exclui automaticamente da construção Docker.
+
+Para conferir o Python e as dependências instaladas, execute containers temporários:
+
+```bash
+docker run --rm webhook-delivery-api:dev python --version
+docker run --rm webhook-delivery-api:dev python -m pip check
+```
+
+Esses comandos substituem o comando padrão da imagem e não carregam as configurações do Django nem consultam o banco. `--rm` remove o container ao terminar, preservando a imagem. Construção e verificações devem ser executadas no ambiente local; a presença dos arquivos no repositório não comprova sua execução.
+
+O comando padrão da imagem é o servidor de desenvolvimento Django, executado pelo usuário `app` sem privilégios de administrador. A pasta de trabalho `/app` também pertence a esse usuário, permitindo criar o cache do pytest durante os testes. Ele escuta em `0.0.0.0:8000` dentro do container; isso não publica uma porta na máquina por si só. Não é um servidor para produção. Construir a imagem não inicia a API. A publicação permanece no suporte Django da Vercel com PostgreSQL no Neon.
+
+## API e PostgreSQL pelo Docker Compose
+
+O `compose.yaml` define dois serviços locais: `api`, construído pelo `Dockerfile`, e `db`, com PostgreSQL 17. Antes de iniciar, prepare o `.env` local conforme a seção abaixo, com credenciais próprias, `DJANGO_DEBUG=True`, hosts `127.0.0.1,localhost` e `DJANGO_SECURE_COOKIES=False` para HTTP local.
+
+O Compose fornece as variáveis do `.env` ao container da API por `env_file`. O arquivo não é copiado para a imagem; os valores são fornecidos na execução. Dentro da API, o Compose substitui `POSTGRES_HOST` por `db`, `POSTGRES_PORT` por `5432` e `POSTGRES_SSLMODE` por `disable`, pois esse banco local não configura TLS. A `.env.neon` não participa dessa execução. Para esse fluxo não é necessário ativar a `.venv` nem executar `source .env`; use as configurações locais, sem exportações do Neon no terminal.
+
+Os containers usam a rede criada pelo Compose. O Django encontra o PostgreSQL pelo nome do serviço, `db`; `127.0.0.1` dentro do container da API apontaria para a própria API. A porta interna do banco continua `5432`, mesmo que sua porta publicada na máquina seja outra. `depends_on` com `service_healthy` aguarda o healthcheck do PostgreSQL antes de iniciar a API; não executa migrations nem garante disponibilidade contínua.
+
+Na raiz do projeto, valide a configuração sem exibir seus valores e inicie os serviços:
+
+```bash
+docker compose config -q
+docker compose up -d --build --wait --wait-timeout 60
+docker compose ps
+```
+
+Se estiver usando o servidor Django na `.venv`, encerre-o antes com `Ctrl+C` para liberar a porta `8000`. A API é publicada somente em `127.0.0.1:8000`. Acesse `http://127.0.0.1:8000/api/saude/` no navegador ou no Bruno API Client com `GET`, sem autenticação ou corpo; espere `200` e `{"status": "ok"}`. O banco usa o volume `postgres_data` já definido; os comandos acima não o apagam. A opção `--wait` verifica o healthcheck do banco e a execução do container da API, que ainda não possui healthcheck próprio; confirme a resposta HTTP separadamente.
+
+Consulte os logs e execute os comandos Django dentro do serviço `api`:
+
+```bash
+docker compose logs --tail=50 api
+docker compose exec api python manage.py check
+docker compose exec api python manage.py showmigrations
+docker compose exec api python manage.py migrate
+docker compose exec api python -m pytest -q
+```
+
+`exec api` executa um comando no container da API que já está em execução. `migrate` aplica somente migrations pendentes no PostgreSQL local; não migra o Neon. Os testes atuais de saúde continuam sem acessar o banco. Para parar os serviços e remover os containers preservando os dados, use `docker compose down`.
+
+O código desta etapa fica copiado na imagem, sem montagem da pasta do projeto. Depois de alterar código, testes, dependências ou Dockerfile, repita `docker compose up -d --build --wait --wait-timeout 60`. Depois de mudar somente o `.env`, use `docker compose up -d --wait --wait-timeout 60` para o Compose atualizar o container. Arquivos privados do projeto não são montados dentro da API.
+
+## Preparação local da base e alternativa com .venv
 
 A base foi gerada com Python 3.14 e Django 5.2.18. O banco local usa a imagem oficial PostgreSQL 17. Tenha Docker com Compose disponível e execute os comandos na raiz do repositório.
 
@@ -94,10 +151,10 @@ set +a
 
 Carregue somente seu próprio `.env`: `source` interpreta seu conteúdo como comandos do shell. O Django lê `DJANGO_SECRET_KEY` do ambiente; ele não carrega o arquivo automaticamente. Sem essa variável, a inicialização falha com `KeyError: 'DJANGO_SECRET_KEY'`.
 
-O Compose também lê o `.env` da raiz para preencher sua configuração. Inicie o banco e aguarde a verificação de disponibilidade:
+O Compose também lê o `.env` da raiz para preencher sua configuração. Para executar Django na `.venv` como alternativa ao container, inicie somente o banco e aguarde a verificação de disponibilidade:
 
 ```bash
-docker compose up -d --wait --wait-timeout 60
+docker compose up -d --wait --wait-timeout 60 db
 docker compose ps
 ```
 
@@ -185,7 +242,7 @@ O servidor desse comando é destinado ao desenvolvimento local. Encerre com `Ctr
 
 A Vercel fornece o redirecionamento HTTP para HTTPS e o HSTS do domínio `.vercel.app`. Foram observados o status `308` com `Location` apontando à mesma rota de saúde em HTTPS e o header `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`. Esses controles ficam na hospedagem; não são ativados novamente no Django nesta configuração. [Documentação da Vercel](https://vercel.com/docs/cdn-security/encryption).
 
-O Django configura os atributos dos cookies de sessão e CSRF conforme `DJANGO_SECURE_COOKIES`. Essa alteração passa a valer na Vercel quando o código atualizado for publicado; a verificação dos cookies na publicação ainda está pendente. A configuração não cria um login próprio da API nem muda o acesso público à saúde.
+O Django configura os atributos dos cookies de sessão e CSRF conforme `DJANGO_SECURE_COOKIES`. A configuração foi publicada na PR #3 e o atributo `Secure` do cookie CSRF foi observado na resposta do login do admin. O cookie de sessão será verificado em acesso autenticado; ainda não foi observado. A configuração não cria um login próprio da API nem muda o acesso público à saúde.
 
 O comando `python manage.py check --deploy` verifica configurações locais do Django. Os avisos `security.W004` e `security.W008` podem continuar porque ele não inspeciona o HSTS e o redirecionamento fornecidos pela Vercel. Nesta hospedagem, esses comportamentos devem ser verificados nas respostas públicas. Ao trocar de hospedagem, reavalie onde esses controles serão aplicados. Não há avisos silenciados nesta configuração.
 
