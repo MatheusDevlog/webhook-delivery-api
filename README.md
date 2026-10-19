@@ -35,6 +35,31 @@ Em 17/10/2026, uma tentativa de login no admin publicado com dados fictícios re
 
 A revisão de segurança continua, incluindo a publicação e a verificação dos atributos dos cookies. O sucesso da saúde não substitui essas verificações.
 
+## Imagem Docker para desenvolvimento
+
+O `Dockerfile` descreve uma imagem local com Python 3.14, código da aplicação e dependências de `requirements-dev.txt`, incluindo as ferramentas de testes. A base é a imagem oficial `python:3.14-slim-bookworm`, com Debian e Python; `slim` indica uma variante menor, com menos pacotes do sistema. Não é necessário copiar a `.venv` da máquina.
+
+Na raiz do repositório, com Docker disponível, construa a imagem:
+
+```bash
+docker build -t webhook-delivery-api:dev .
+```
+
+`-t` dá nome e etiqueta à imagem; `.` indica a pasta atual como origem dos arquivos da construção. O Docker lê o `Dockerfile` e aplica o `.dockerignore` antes de enviar esses arquivos à construção. A primeira execução precisa baixar a imagem base e as dependências.
+
+O `.dockerignore` exclui `.env`, `.env.neon`, `.venv/`, `docs/`, histórico Git e arquivos gerados. `.env.example` continua permitido por conter somente exemplos públicos. Configurações e credenciais reais deverão ser fornecidas ao executar o container, sem serem gravadas na imagem. O `.gitignore` e o `.dockerignore` controlam ferramentas diferentes; ignorar um arquivo no Git não o exclui automaticamente da construção Docker.
+
+Para conferir o Python e as dependências instaladas, execute containers temporários:
+
+```bash
+docker run --rm webhook-delivery-api:dev python --version
+docker run --rm webhook-delivery-api:dev python -m pip check
+```
+
+Esses comandos substituem o comando padrão da imagem e não carregam as configurações do Django nem consultam o banco. `--rm` remove o container ao terminar, preservando a imagem. Construção e verificações devem ser executadas no ambiente local; a presença dos arquivos no repositório não comprova sua execução.
+
+O comando padrão da imagem é o servidor de desenvolvimento Django, executado pelo usuário `app` sem privilégios de administrador. Ele escuta em `0.0.0.0:8000` dentro do container; isso não publica uma porta na máquina por si só. Não é um servidor para produção. Nesta etapa, o Compose ainda define somente o PostgreSQL; a execução conjunta da API e do banco será acrescentada separadamente. Construir a imagem não inicia a API. A publicação permanece no suporte Django da Vercel com PostgreSQL no Neon.
+
 ## Preparação local da base
 
 A base foi gerada com Python 3.14 e Django 5.2.18. O banco local usa a imagem oficial PostgreSQL 17. Tenha Docker com Compose disponível e execute os comandos na raiz do repositório.
