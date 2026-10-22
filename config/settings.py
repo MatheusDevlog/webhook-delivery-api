@@ -35,6 +35,12 @@ ALLOWED_HOSTS = [
 SESSION_COOKIE_SECURE = os.environ.get('DJANGO_SECURE_COOKIES', 'True') != 'False'
 CSRF_COOKIE_SECURE = SESSION_COOKIE_SECURE
 
+WEBHOOK_ALLOWED_URLS = [
+    url.strip()
+    for url in os.environ.get('WEBHOOK_ALLOWED_URLS', '').split(',')
+    if url.strip()
+]
+
 
 # Application definition
 
@@ -46,6 +52,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'webhooks.apps.WebhooksConfig',
 ]
 
 MIDDLEWARE = [
