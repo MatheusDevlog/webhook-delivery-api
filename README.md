@@ -4,9 +4,9 @@ Projeto de backend para registrar eventos, enviar webhooks a destinos autorizado
 
 ## Estado atual
 
-A estrutura padrão do Django foi gerada e configurada para PostgreSQL local em Docker Compose. O Django REST Framework está registrado e existe uma rota de saúde com testes automatizados. A base está publicada na Vercel; os endpoints de webhooks e a demonstração interativa ainda não foram implementados.
+A aplicação usa Django e DRF, com PostgreSQL e execução local por Docker Compose. Existe uma rota de saúde com testes automatizados e cadastro de destinos autorizados pelo admin Django. O registro de eventos, o envio de webhooks e a demonstração interativa ainda não foram implementados.
 
-A conexão ao PostgreSQL no Neon foi verificada pelo terminal com criptografia exigida e as migrations padrão do Django foram aplicadas nesse banco. A consulta ao banco pela aplicação executada na Vercel também foi verificada pelo fluxo de autenticação do admin. A preparação do banco hospedado está documentada abaixo.
+A base está publicada na Vercel. A conexão ao PostgreSQL no Neon foi verificada pelo terminal com criptografia exigida, e a consulta pela aplicação hospedada foi verificada pelo fluxo de autenticação do admin. Cada ambiente precisa das migrations correspondentes ao código publicado; não presuma que gerar ou aplicar uma migration localmente atualiza o Neon.
 
 O MVP planejado terá uma tentativa síncrona por evento, registro do resultado HTTP e consulta do estado. A demonstração usará dados fictícios e receptores controlados.
 
@@ -34,6 +34,52 @@ A publicação usa variáveis configuradas na Vercel em **Production**: chave Dj
 Em 17/10/2026, uma tentativa de login no admin publicado com dados fictícios retornou a mensagem padrão de credenciais inválidas. Na configuração padrão usada aqui, essa resposta ocorre após consultar o usuário no banco: confirma uma leitura pela aplicação hospedada, sem comprovar login autorizado ou gravação de dados. Apenas abrir o formulário não seria suficiente.
 
 Após a publicação da PR #3, a saúde e o login do admin retornaram `200`, e a resposta do login apresentou o cookie `csrftoken` com o atributo `Secure`. O cookie de sessão ainda não foi observado em acesso autenticado. O sucesso da saúde não substitui verificações de segurança nem de acesso ao banco.
+
+## Cadastro de destinos no admin
+
+O aplicativo `webhooks` possui o modelo `WebhookEndpoint`. Após aplicar a migration `webhooks/0001_initial`, cada registro guarda:
+
+| Campo | Finalidade |
+| --- | --- |
+| `id` | UUID gerado pela aplicação, sem edição no formulário. |
+| `url` | URL HTTPS autorizada do receptor, limitada a 2048 bytes em UTF-8. |
+| `event_type` | Tipo de evento com até 100 caracteres, como `pedido.pago`. |
+| `created_at` | Data e hora do cadastro, preenchidas automaticamente. |
+
+Uma mesma URL pode atender a tipos de evento diferentes. A combinação `url` + `event_type` é única, com restrição no PostgreSQL. O tipo deve ter duas ou mais partes separadas por pontos; cada parte começa com uma letra minúscula ASCII e pode conter letras minúsculas, números e `_`.
+
+O operador define URLs exatas permitidas em `WEBHOOK_ALLOWED_URLS`, separadas por vírgulas. Vazio ou ausente bloqueia novos cadastros. No `.env` local, um exemplo fictício para explorar somente o cadastro é:
+
+```ini
+WEBHOOK_ALLOWED_URLS=https://receiver.example/webhook
+```
+
+`receiver.example` é ilustrativo, não um receptor funcional. Para uso real, configure somente receptores que você controla ou tem autorização para usar. Os valores são URLs completas, não domínios ou padrões: uma URL permitida não autoriza outros caminhos, subdomínios ou variações. Uma vírgula literal na URL deve ser codificada como `%2C` para não ser interpretada como separador da configuração.
+
+A validação exige HTTPS e porta padrão (`443`, explícita ou implícita), sem credenciais, query string ou fragmento. Rejeita nomes locais/internos conhecidos e IPs literais não públicos em IPv4/IPv6, mesmo que apareçam na lista permitida. O formulário do admin assume HTTPS se o protocolo for omitido; o valor final ainda precisa corresponder exatamente à lista.
+
+O cadastro não resolve DNS nem faz chamada de teste ao receptor. Essas regras não constituem proteção completa contra SSRF: DNS e destino efetivo da conexão precisarão ser verificados novamente antes de existir envio real. Retirar uma URL da configuração não apaga registros existentes. [Referência de segurança OWASP](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html).
+
+Com o `.env` preparado, inicialize os serviços e aplique as migrations locais:
+
+```bash
+docker compose up -d --build --wait --wait-timeout 60
+docker compose exec api python manage.py migrate
+```
+
+Para criar seu acesso administrativo local, use o comando interativo oficial:
+
+```bash
+docker compose exec api python manage.py createsuperuser
+```
+
+Escolha credenciais próprias e não as versione nem reutilize na hospedagem. Abra `http://127.0.0.1:8000/admin/`, faça login e entre em **Webhooks → Destinos de webhook → Adicionar**. A lista fica em `/admin/webhooks/webhookendpoint/` e o formulário em `/admin/webhooks/webhookendpoint/add/`. Preencha a URL autorizada e `pedido.pago` e salve; o registro aparecerá na lista, com UUID e data. Não há disparo de evento ou envio HTTP nesse processo.
+
+O admin exige usuário ativo da equipe (`is_staff`) e a permissão correspondente: `add_webhookendpoint` para cadastrar e `view_webhookendpoint` para consultar. Um superusuário tem essas permissões; um usuário comum ou da equipe sem a permissão necessária não ganha acesso. Edição e exclusão ficam bloqueadas no admin, inclusive para superusuários; não há ações em lote. Listagem, pesquisa, filtro por tipo e detalhe para consulta estão disponíveis.
+
+O formulário usa as validações do modelo. Em scripts que escrevam diretamente pelo ORM, chame `full_clean()` antes de `save()`; o Django não faz essa validação automaticamente no `save()`. A restrição de duplicidade continua sendo aplicada pelo banco. Não há endpoint REST de cadastro nem política geral de acesso definida para as futuras operações de eventos/envio. [Validação de modelos no Django](https://docs.djangoproject.com/en/5.2/ref/models/instances/#validating-objects).
+
+Na Vercel, aplique a migration no banco Neon e configure `WEBHOOK_ALLOWED_URLS` em Production antes de usar o cadastro. A configuração local e a criação de um superusuário local não alteram o ambiente hospedado. Preview continua separado e ainda não foi preparado.
 
 ## Imagem Docker para desenvolvimento
 
@@ -168,7 +214,7 @@ python manage.py migrate
 python manage.py showmigrations
 ```
 
-`check` verifica a configuração; `migrate` conecta ao PostgreSQL e cria as tabelas dos componentes padrão do Django; `showmigrations` lista quais migrations estão aplicadas, com `[X]`. Ainda não há tabelas de webhooks; os testes de comportamento atuais cobrem somente a rota de saúde.
+`check` verifica a configuração; `migrate` conecta ao PostgreSQL e aplica as migrations, incluindo a tabela de destinos; `showmigrations` lista quais migrations estão aplicadas, com `[X]`. Ainda não existem tabelas de eventos ou tentativas de entrega.
 
 Os dados ficam no volume `postgres_data`, gerenciado pelo Docker e separado dos arquivos versionados. Para parar e remover os containers preservando o volume:
 
@@ -266,7 +312,9 @@ Com `STATIC_ROOT` configurado, a Vercel executa a coleta automaticamente durante
 
 ## Ferramentas de testes
 
-`pytest.ini` indica `config.settings` para inicializar Django e procura arquivos chamados `test_*.py`. `tests/test_health.py` verifica GET sem autenticação, resposta JSON e rejeição de POST na rota de saúde. Também verifica, com `DEBUG = False` e uma lista explícita de hosts, a aceitação de um host autorizado e a rejeição de outro com HTTP `400`. Essa rejeição é feita pelo Django e não precisa ter corpo JSON, mesmo quando a requisição pede JSON. Novos testes serão escritos conforme os comportamentos da API forem implementados.
+`pytest.ini` indica `config.settings` para inicializar Django e procura arquivos chamados `test_*.py`. `tests/test_health.py` verifica a saúde pública, a rejeição de POST e, com `DEBUG=False`, a aceitação do host permitido e a rejeição de outro com `400`. Esse erro de host é produzido pelo Django e não precisa ter corpo JSON.
+
+`tests/test_webhook_endpoints.py` cobre URLs permitidas/proibidas, componentes inseguros, IPs locais, formato do tipo, campos obrigatórios, persistência e duplicidade, inclusive a restrição no PostgreSQL. `tests/test_webhook_admin.py` cobre cadastro e consulta pelo operador, rejeição de entradas inválidas, acesso por perfil/permissão, proteção CSRF e bloqueio de edição/exclusão. Os testes de autorização usam sessões criadas por `force_login` para isolar as permissões; isso não simula digitação de senha ou verifica login/cookies na hospedagem.
 
 Após instalar as dependências de desenvolvimento, confirme a instalação:
 
@@ -281,7 +329,7 @@ Execute com a `.venv` ativa e as variáveis do `.env` carregadas:
 python -m pytest -q
 ```
 
-Os testes atuais usam o cliente de testes do Django, sem servidor HTTP ativo e sem acesso ao banco. pytest-django bloqueia acesso ao banco nesses testes, que não solicitam essa permissão. Quando forem acrescentados testes que usam dados, mantenha PostgreSQL disponível: pytest-django usará um banco de testes separado, criado no PostgreSQL local. Nenhum teste encontrado (código 5) não significa aprovação.
+Os testes usam o cliente interno do Django, sem servidor HTTP externo. A saúde e as validações isoladas não acessam o banco; persistência e admin usam `pytest-django` em um banco separado, com prefixo `test_`, no PostgreSQL local. Execute-os com configurações locais, nunca apontando a suíte ao Neon. Os receptores fictícios são valores de teste: nenhum HTTP ou DNS externo é executado para validá-los. Nenhum teste encontrado (código 5) não significa aprovação.
 
 Os exemplos dos endpoints de webhooks serão acrescentados conforme a implementação avançar.
 

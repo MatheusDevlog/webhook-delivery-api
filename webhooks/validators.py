@@ -18,6 +18,12 @@ validate_event_type = RegexValidator(
 
 def validate_webhook_url(value):
     URLValidator(schemes=['https'])(value)
+    if len(value.encode('utf-8')) > 2048:
+        raise ValidationError(
+            'A URL não pode exceder 2048 bytes em UTF-8.',
+            code='url_too_long',
+        )
+
     try:
         parsed = urlsplit(value)
         port = parsed.port

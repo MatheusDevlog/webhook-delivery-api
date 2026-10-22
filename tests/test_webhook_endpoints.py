@@ -110,6 +110,16 @@ def test_empty_allowlist_denies_registration(settings):
     assert error.value.code == 'unapproved_destination'
 
 
+def test_rejects_url_exceeding_byte_limit_even_if_allowlisted(settings):
+    url = 'https://receiver.example/' + 'á' * 1100
+    settings.WEBHOOK_ALLOWED_URLS = [url]
+
+    with pytest.raises(ValidationError) as error:
+        validate_webhook_url(url)
+
+    assert error.value.code == 'url_too_long'
+
+
 @pytest.mark.parametrize('event_type', ['pedido.pago', 'pedido_2.item3.criado'])
 def test_accepts_namespaced_event_type(event_type):
     validate_event_type(event_type)
