@@ -29,11 +29,19 @@ Para consultar pelo Bruno API Client, ferramenta para testar APIs, use `GET` nes
 
 A saúde pública foi verificada no navegador. Ela confirma que a aplicação responde, sem consultar o banco nem realizar envios externos. O endereço `/` ainda não possui página inicial. Este link permite explorar a base publicada; o fluxo de webhooks ainda está em desenvolvimento.
 
-A publicação usa variáveis configuradas na Vercel em **Production**: chave Django própria, `DJANGO_DEBUG=False`, `DJANGO_ALLOWED_HOSTS=webhook-delivery-api.vercel.app` e as opções `POSTGRES_*` do Neon, com `POSTGRES_SSLMODE=require`. Senhas e chaves não são versionadas. O ambiente **Preview** ainda não foi preparado.
+A publicação usa variáveis configuradas na Vercel em **Production**: chave Django própria, `DJANGO_DEBUG=False`, `DJANGO_ALLOWED_HOSTS=webhook-delivery-api.vercel.app` e as opções `POSTGRES_*` do Neon, com `POSTGRES_SSLMODE=require`. Senhas e chaves não são versionadas. O projeto adota publicação automática somente da `main`, conforme a configuração abaixo.
 
 Em 17/10/2026, uma tentativa de login no admin publicado com dados fictícios retornou a mensagem padrão de credenciais inválidas. Na configuração padrão usada aqui, essa resposta ocorre após consultar o usuário no banco: confirma uma leitura pela aplicação hospedada, sem comprovar login autorizado ou gravação de dados. Apenas abrir o formulário não seria suficiente.
 
 Após a publicação da PR #3, a saúde e o login do admin retornaram `200`, e a resposta do login apresentou o cookie `csrftoken` com o atributo `Secure`. O cookie de sessão ainda não foi observado em acesso autenticado. O sucesso da saúde não substitui verificações de segurança nem de acesso ao banco.
+
+### Publicação automática somente da main
+
+O arquivo `vercel.json`, na raiz, configura `git.deploymentEnabled` com `"**": false` e `"main": true`. A primeira regra desativa deploys automáticos para todas as branches, incluindo nomes com `/`; a exceção mantém o deploy automático da `main`. Quando mais de uma regra corresponde à branch, uma regra com `true` permite a publicação. [Configuração Git da Vercel](https://vercel.com/docs/project-configuration/git-configuration#git.deploymentenabled).
+
+Branches de trabalho são verificadas localmente antes da PR. Depois do merge na `main`, a integração Git da Vercel publica a aplicação em Production. Não é mantido um ambiente Preview nem um banco adicional para ele. Essa escolha reduz a configuração do MVP; problemas específicos da hospedagem podem aparecer somente após o merge, por isso a publicação precisa ser conferida a cada entrega.
+
+A regra controla os deploys automáticos disparados pela integração Git. Ela não apaga publicações antigas nem impede deploys manuais. Ao enviar essa configuração, confirme que o push da branch de trabalho não gera um novo Preview; após o merge, confira o deploy da `main` em Production e a resposta da saúde. Essas verificações na plataforma não são substituídas pela validação local do JSON.
 
 ## Cadastro de destinos no admin
 
@@ -79,7 +87,7 @@ O admin exige usuário ativo da equipe (`is_staff`) e a permissão correspondent
 
 O formulário usa as validações do modelo. Em scripts que escrevam diretamente pelo ORM, chame `full_clean()` antes de `save()`; o Django não faz essa validação automaticamente no `save()`. A restrição de duplicidade continua sendo aplicada pelo banco. Não há endpoint REST de cadastro nem política geral de acesso definida para as futuras operações de eventos/envio. [Validação de modelos no Django](https://docs.djangoproject.com/en/5.2/ref/models/instances/#validating-objects).
 
-Na Vercel, aplique a migration no banco Neon e configure `WEBHOOK_ALLOWED_URLS` em Production antes de usar o cadastro. A configuração local e a criação de um superusuário local não alteram o ambiente hospedado. Preview continua separado e ainda não foi preparado.
+Na Vercel, aplique a migration no banco Neon e configure `WEBHOOK_ALLOWED_URLS` em Production antes de usar o cadastro. A configuração local e a criação de um superusuário local não alteram o ambiente hospedado. O fluxo de publicação automática usa somente a `main`; não há banco de Preview neste projeto.
 
 ## Imagem Docker para desenvolvimento
 
