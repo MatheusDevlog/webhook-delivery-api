@@ -4,7 +4,7 @@ Projeto de backend para registrar eventos, enviar webhooks a destinos autorizado
 
 ## Estado atual
 
-A aplicação usa Django e DRF, com PostgreSQL e execução local por Docker Compose. Existe uma rota de saúde com testes automatizados e cadastro de destinos autorizados pelo admin Django. O registro de eventos, o envio de webhooks e a demonstração interativa ainda não foram implementados.
+A aplicação usa Django e DRF, com PostgreSQL e execução local por Docker Compose. Existe uma rota de saúde, cadastro de destinos autorizados pelo admin Django e endpoints restritos para registrar e consultar eventos, com testes automatizados. O envio de webhooks e a demonstração interativa ainda não foram implementados.
 
 A base está publicada na Vercel. A conexão ao PostgreSQL no Neon foi verificada pelo terminal com criptografia exigida, e a consulta pela aplicação hospedada foi verificada pelo fluxo de autenticação do admin. Cada ambiente precisa das migrations correspondentes ao código publicado; não presuma que gerar ou aplicar uma migration localmente atualiza o Neon.
 
@@ -85,9 +85,92 @@ Escolha credenciais próprias e não as versione nem reutilize na hospedagem. Ab
 
 O admin exige usuário ativo da equipe (`is_staff`) e a permissão correspondente: `add_webhookendpoint` para cadastrar e `view_webhookendpoint` para consultar. Um superusuário tem essas permissões; um usuário comum ou da equipe sem a permissão necessária não ganha acesso. Edição e exclusão ficam bloqueadas no admin, inclusive para superusuários; não há ações em lote. Listagem, pesquisa, filtro por tipo e detalhe para consulta estão disponíveis.
 
-O formulário usa as validações do modelo. Em scripts que escrevam diretamente pelo ORM, chame `full_clean()` antes de `save()`; o Django não faz essa validação automaticamente no `save()`. A restrição de duplicidade continua sendo aplicada pelo banco. Não há endpoint REST de cadastro nem política geral de acesso definida para as futuras operações de eventos/envio. [Validação de modelos no Django](https://docs.djangoproject.com/en/5.2/ref/models/instances/#validating-objects).
+O formulário usa as validações do modelo. Em scripts que escrevam diretamente pelo ORM, chame `full_clean()` antes de `save()`; o Django não faz essa validação automaticamente no `save()`. A restrição de duplicidade continua sendo aplicada pelo banco. Não há endpoint REST de cadastro de destinos. As rotas de eventos possuem política explícita de acesso, descrita abaixo; operações de envio ainda não existem. [Validação de modelos no Django](https://docs.djangoproject.com/en/5.2/ref/models/instances/#validating-objects).
 
 Na Vercel, aplique a migration no banco Neon e configure `WEBHOOK_ALLOWED_URLS` em Production antes de usar o cadastro. A configuração local e a criação de um superusuário local não alteram o ambiente hospedado. O fluxo de publicação automática usa somente a `main`; não há banco de Preview neste projeto.
+
+## Modelo de eventos
+
+O modelo `Event` representa um aviso destinado a um único `WebhookEndpoint`. Por exemplo, um evento `pedido.pago` pode guardar `{"pedido_id": 123}` em `payload`. A migration `webhooks/0002_event` cria sua tabela.
+
+| Campo | Finalidade |
+| --- | --- |
+| `id` | UUID do aviso, gerado pela aplicação. |
+| `endpoint` | Referência ao destino cadastrado, protegida contra exclusão enquanto houver eventos vinculados. |
+| `event_type` | Tipo do aviso, que deve corresponder ao tipo cadastrado no destino. |
+| `payload` | Dados do aviso em um objeto JSON. |
+| `status` | Estado inicial `pending` (pendente), sem edição em formulários. |
+| `created_at` | Data e hora do registro, preenchidas automaticamente. |
+
+`Event.full_clean()` valida os dados e verifica novamente se a URL do destino continua autorizada. Não realiza HTTP nem DNS. `payload` aceita objetos, inclusive `{}`, com valores JSON válidos; seu tamanho máximo é 16 KiB (16.384 bytes), medido em JSON compacto codificado em UTF-8. Rejeita números não finitos, chaves que não sejam textos, Unicode inválido e o caractere nulo U+0000, incompatível com o armazenamento JSONB do PostgreSQL.
+
+O banco exige um destino existente e, nesta etapa, permite somente o estado `pending`. Estados de entrega dependerão de implementação e migration próprias. Registrar dois avisos iguais gera eventos com IDs diferentes: não existe deduplicação por conteúdo ou chave de idempotência.
+
+Em escritas diretas pelo ORM, chame `full_clean()` antes de `save()`; salvar não executa essa validação automaticamente. O serializer da API executa `full_clean()` antes de permitir a criação e devolve erros de validação associados aos campos da requisição. Não há formulário de eventos no admin. Salvar um evento não dispara envio. Cada banco precisa receber sua migration antes de usar essa tabela.
+
+## Registro e consulta de eventos
+
+Estas rotas são internas ao operador. Exigem usuário ativo da equipe (`is_staff`), uma sessão Django autenticada e a permissão correspondente. Não há cadastro público de usuários nem acesso anônimo aos eventos. A saúde permanece pública.
+
+| Método e caminho | Permissão | Resultado |
+| --- | --- | --- |
+| `POST /api/eventos/` | `webhooks.add_event` | Registra um aviso e retorna `201`. |
+| `GET /api/eventos/<uuid>/` | `webhooks.view_event` | Consulta um aviso e retorna `200`, ou `404` se o ID válido não existir. |
+
+O acesso usa `SessionAuthentication`, com proteção CSRF no POST. `EventModelPermissions` exige explicitamente a permissão de consulta para GET, HEAD e OPTIONS; o padrão de `DjangoModelPermissions` não exige `view` no GET. As permissões são por modelo: um operador autorizado a consultar pode acessar os eventos do serviço; não existe separação por proprietário ou produto multiusuário. [Autenticação por sessão no DRF](https://www.django-rest-framework.org/api-guide/authentication/#sessionauthentication).
+
+### Registrar um aviso
+
+Envie JSON com exatamente `endpoint_id`, `event_type` e `payload`. Substitua o UUID ilustrativo pelo ID de um destino cadastrado e ainda autorizado:
+
+```json
+{
+  "endpoint_id": "11111111-1111-4111-8111-111111111111",
+  "event_type": "pedido.pago",
+  "payload": {
+    "pedido_id": 123
+  }
+}
+```
+
+O tipo deve corresponder ao destino e o payload deve respeitar as regras do modelo. Campos desconhecidos ou controlados pela aplicação, como `id`, `status` e `created_at`, são rejeitados com `400`. O limite de 16 KiB é do payload em JSON compacto UTF-8, não do corpo HTTP completo.
+
+A resposta `201` contém `id`, `endpoint_id`, `event_type`, `payload`, `status` e `created_at`. Exemplo ilustrativo:
+
+```json
+{
+  "id": "22222222-2222-4222-8222-222222222222",
+  "endpoint_id": "11111111-1111-4111-8111-111111111111",
+  "event_type": "pedido.pago",
+  "payload": {"pedido_id": 123},
+  "status": "pending",
+  "created_at": "2026-10-25T12:00:00Z"
+}
+```
+
+### Consultar e tratar erros
+
+Use `GET /api/eventos/<id-retornado>/` com a mesma sessão e permissão de consulta. A resposta apresenta os mesmos campos. Remover a URL da lista permitida impede novos cadastros para ela, mas mantém a consulta aos eventos existentes.
+
+Não há listagem em `GET /api/eventos/`, nem edição, exclusão ou rota de envio. Métodos sem atendimento retornam `405` depois das verificações de acesso; uma operação sem permissão pode ser rejeitada antes com `403`. Um UUID malformado no caminho é rejeitado pelo roteamento Django com `404`, cuja resposta pode ser HTML.
+
+| Status | Significado nesta API |
+| --- | --- |
+| `400` | Campos ausentes, destino inválido/desautorizado, tipo incompatível, payload inválido/grande ou JSON incorreto. |
+| `403` | Sessão ausente/inválida, usuário sem acesso ou falha de CSRF. Autenticação por sessão usa `403` nesses casos. |
+| `404` | Evento não encontrado ou UUID inválido no caminho. |
+| `405` | Método sem atendimento, após autorização. |
+| `415` | Corpo enviado com Content-Type diferente de `application/json`. |
+
+### Explorar localmente
+
+Prepare o `.env`, a URL autorizada, os serviços, as migrations e seu acesso local conforme as seções anteriores. Faça login em `http://127.0.0.1:8000/admin/`. Um superusuário local possui as permissões necessárias; para outro operador ativo da equipe, atribua `add_event` e `view_event` pelo admin.
+
+No mesmo navegador e usando o mesmo host, abra `http://127.0.0.1:8000/api/eventos/`. O GET retorna `405`, pois não existe listagem, mas a interface navegável do DRF permite enviar o JSON pelo formulário de conteúdo e botão POST. Use o ID retornado para abrir `/api/eventos/<id>/` e consultar o aviso. Cookies de login em `127.0.0.1` não autenticam automaticamente `localhost`.
+
+No Bruno API Client, envie `Content-Type: application/json` e `Accept: application/json`. Para autenticar, o cliente precisa dos cookies `sessionid` e `csrftoken` de um login Django válido no mesmo ambiente; no POST, envie também `X-CSRFToken` com o token correspondente ao cookie. Sem sessão/permissão ou sem CSRF válido, espere `403` e nenhum evento novo. Não compartilhe nem versione esses valores. Autenticação Basic ou token não foi habilitada nessas rotas.
+
+Os testes automatizados verificam cadastro `201`, consulta `200`, efeitos no banco e rejeições. Login, sessão, CSRF e atributos Secure também são exercitados em um teste com HTTPS simulado no cliente Django; isso não comprova uma conta ou cookies autenticados na Vercel. Testes manuais autenticados no navegador/Bruno devem ser verificados no ambiente usado. Antes de publicar, aplique `0002_event` no Neon e confira o ambiente hospedado; deploy e saúde não substituem essa preparação.
 
 ## Imagem Docker para desenvolvimento
 
@@ -222,7 +305,7 @@ python manage.py migrate
 python manage.py showmigrations
 ```
 
-`check` verifica a configuração; `migrate` conecta ao PostgreSQL e aplica as migrations, incluindo a tabela de destinos; `showmigrations` lista quais migrations estão aplicadas, com `[X]`. Ainda não existem tabelas de eventos ou tentativas de entrega.
+`check` verifica a configuração; `migrate` conecta ao PostgreSQL e aplica as migrations, incluindo as tabelas de destinos e eventos; `showmigrations` lista quais migrations estão aplicadas, com `[X]`. Ainda não existe tabela de tentativas de entrega.
 
 Os dados ficam no volume `postgres_data`, gerenciado pelo Docker e separado dos arquivos versionados. Para parar e remover os containers preservando o volume:
 
@@ -323,6 +406,12 @@ Com `STATIC_ROOT` configurado, a Vercel executa a coleta automaticamente durante
 `pytest.ini` indica `config.settings` para inicializar Django e procura arquivos chamados `test_*.py`. `tests/test_health.py` verifica a saúde pública, a rejeição de POST e, com `DEBUG=False`, a aceitação do host permitido e a rejeição de outro com `400`. Esse erro de host é produzido pelo Django e não precisa ter corpo JSON.
 
 `tests/test_webhook_endpoints.py` cobre URLs permitidas/proibidas, componentes inseguros, IPs locais, formato do tipo, campos obrigatórios, persistência e duplicidade, inclusive a restrição no PostgreSQL. `tests/test_webhook_admin.py` cobre cadastro e consulta pelo operador, rejeição de entradas inválidas, acesso por perfil/permissão, proteção CSRF e bloqueio de edição/exclusão. Os testes de autorização usam sessões criadas por `force_login` para isolar as permissões; isso não simula digitação de senha ou verifica login/cookies na hospedagem.
+
+`tests/test_event_payload.py` cobre formato, tamanho e valores permitidos nos dados JSON, sem acessar o banco. `tests/test_events.py` cobre persistência de eventos pendentes, compatibilidade de tipo, revalidação do destino e referências inexistentes. Também verifica as restrições do PostgreSQL, a proteção do destino contra exclusão e a criação de IDs distintos para avisos com conteúdo repetido.
+
+`tests/test_event_serializers.py` verifica o contrato de entrada e saída, os campos obrigatórios, a rejeição de campos controlados pela aplicação e a transformação do ID recebido em um destino. Exercita a validação diretamente no serializer, sem fazer requisições HTTP.
+
+`tests/test_event_api.py` cobre registro/consulta HTTP, rejeições representativas de entrada, JSON incorreto, formato do contrato, perfis e permissões de acesso, CSRF, métodos rejeitados e repetição de cadastros. Um teste usa login com senha e HTTPS simulado para exercitar sessão, CSRF e cookies Secure; os demais testes de autorização isolam as permissões com `force_login`. Nenhuma conta permanente ou credencial hospedada é criada por essa suíte.
 
 Após instalar as dependências de desenvolvimento, confirme a instalação:
 
