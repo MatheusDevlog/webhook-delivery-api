@@ -4,7 +4,7 @@ Projeto de backend para registrar eventos, enviar webhooks a destinos autorizado
 
 ## Estado atual
 
-A aplicação usa Django e DRF, com PostgreSQL e execução local por Docker Compose. Existe uma rota de saúde, cadastro de destinos autorizados pelo admin Django e endpoints restritos para registrar e consultar eventos, com testes automatizados. O envio de webhooks e a demonstração interativa ainda não foram implementados.
+A aplicação usa Django e DRF, com PostgreSQL e execução local por Docker Compose. Existe uma rota de saúde, cadastro de destinos autorizados pelo admin Django, endpoints restritos para registrar e consultar eventos e um modelo para armazenar tentativas de entrega, com testes automatizados. O envio de webhooks e a demonstração interativa ainda não foram implementados.
 
 A base está publicada na Vercel. A conexão ao PostgreSQL no Neon foi verificada pelo terminal com criptografia exigida, e a consulta pela aplicação hospedada foi verificada pelo fluxo de autenticação do admin. Cada ambiente precisa das migrations correspondentes ao código publicado; não presuma que gerar ou aplicar uma migration localmente atualiza o Neon.
 
@@ -107,6 +107,34 @@ O modelo `Event` representa um aviso destinado a um único `WebhookEndpoint`. Po
 O banco exige um destino existente e, nesta etapa, permite somente o estado `pending`. Estados de entrega dependerão de implementação e migration próprias. Registrar dois avisos iguais gera eventos com IDs diferentes: não existe deduplicação por conteúdo ou chave de idempotência.
 
 Em escritas diretas pelo ORM, chame `full_clean()` antes de `save()`; salvar não executa essa validação automaticamente. O serializer da API executa `full_clean()` antes de permitir a criação e devolve erros de validação associados aos campos da requisição. Não há formulário de eventos no admin. Salvar um evento não dispara envio. Cada banco precisa receber sua migration antes de usar essa tabela.
+
+## Modelo de tentativas de entrega
+
+`DeliveryAttempt` armazena os dados de uma tentativa para um único evento. A migration `webhooks/0003_delivery_attempt` cria a tabela; deve ser aplicada em cada banco onde o modelo será usado.
+
+| Campo | Finalidade |
+| --- | --- |
+| `id` | UUID da tentativa, gerado pela aplicação. |
+| `event` | Vínculo único com o evento, protegido contra exclusão pelo ORM enquanto houver tentativa. |
+| `started_at` | Início, preenchido por padrão com o horário atual. |
+| `finished_at` | Término; vazio enquanto não houver resultado registrado. |
+| `http_status` | Resposta HTTP final entre 200 e 599, quando recebida. |
+| `error_code` | Vazio ou uma categoria: `http_error`, `network_error` ou `timeout`. |
+
+O PostgreSQL permite no máximo uma tentativa por evento neste MVP. A relação `OneToOneField` impede um segundo registro; não garante, sozinha, que um futuro serviço não faça duas chamadas de rede. Retry exigirá rever esse limite e o fluxo de envio.
+
+As restrições do modelo e do banco permitem somente estas combinações:
+
+- Em andamento: sem término, sem código HTTP e sem categoria de falha.
+- Resposta HTTP 200–299: com término e sem categoria de falha.
+- Resposta HTTP 300–599: com término e categoria `http_error`.
+- Falha sem resposta HTTP: com término, sem código HTTP e categoria `network_error` ou `timeout`.
+
+O término não pode ser anterior ao início. Por exemplo, uma resposta 500 exige `http_error`; um timeout não recebe um código HTTP inventado. Timeout ou falha de comunicação não comprovam que o destinatário deixou de receber o evento. Uma resposta 2xx também não comprova que o destinatário concluiu seu processamento interno.
+
+`full_clean()` verifica as regras antes de salvar, e as restrições do PostgreSQL também protegem escritas que pulem essa validação. Não há armazenamento de corpo/headers da resposta nem de texto livre de exceções. O modelo gera somente a permissão de consulta; não está registrado no admin e não possui rota ou serializer próprios.
+
+Nesta etapa, cadastrar um evento não cria uma tentativa. O modelo apenas prepara a persistência; não faz HTTP, não coordena transações ou concorrência e não altera `Event.status`, que continua `pending`. Um registro sem término representa resultado ainda não registrado, inclusive se a execução futura for interrompida; não autoriza recuperação ou novo envio automático.
 
 ## Registro e consulta de eventos
 
@@ -305,7 +333,7 @@ python manage.py migrate
 python manage.py showmigrations
 ```
 
-`check` verifica a configuração; `migrate` conecta ao PostgreSQL e aplica as migrations, incluindo as tabelas de destinos e eventos; `showmigrations` lista quais migrations estão aplicadas, com `[X]`. Ainda não existe tabela de tentativas de entrega.
+`check` verifica a configuração; `migrate` conecta ao PostgreSQL e aplica as migrations, incluindo as tabelas de destinos, eventos e tentativas de entrega; `showmigrations` lista quais migrations estão aplicadas, com `[X]`.
 
 Os dados ficam no volume `postgres_data`, gerenciado pelo Docker e separado dos arquivos versionados. Para parar e remover os containers preservando o volume:
 
@@ -412,6 +440,8 @@ Com `STATIC_ROOT` configurado, a Vercel executa a coleta automaticamente durante
 `tests/test_event_serializers.py` verifica o contrato de entrada e saída, os campos obrigatórios, a rejeição de campos controlados pela aplicação e a transformação do ID recebido em um destino. Exercita a validação diretamente no serializer, sem fazer requisições HTTP.
 
 `tests/test_event_api.py` cobre registro/consulta HTTP, rejeições representativas de entrada, JSON incorreto, formato do contrato, perfis e permissões de acesso, CSRF, métodos rejeitados e repetição de cadastros. Um teste usa login com senha e HTTPS simulado para exercitar sessão, CSRF e cookies Secure; os demais testes de autorização isolam as permissões com `force_login`. Nenhuma conta permanente ou credencial hospedada é criada por essa suíte.
+
+`tests/test_delivery_attempts.py` cobre início e conclusão de uma tentativa, resultados HTTP e falhas sem resposta, limite de uma tentativa por evento, referência obrigatória a um evento existente e proteção contra sua exclusão. Verifica rejeição de horários e resultados incoerentes tanto por `full_clean()` quanto pelo PostgreSQL em escrita direta. Os resultados são dados simulados; não há envio HTTP externo.
 
 Após instalar as dependências de desenvolvimento, confirme a instalação:
 

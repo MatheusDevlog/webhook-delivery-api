@@ -1,7 +1,9 @@
 import uuid
 
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.utils import timezone
 
 from .validators import (
     validate_event_payload,
@@ -112,3 +114,82 @@ class Event(models.Model):
 
     def __str__(self):
         return f'{self.event_type} - {self.id}'
+
+
+class DeliveryAttempt(models.Model):
+    class ErrorCode(models.TextChoices):
+        HTTP_ERROR = 'http_error', 'Resposta HTTP sem sucesso'
+        NETWORK_ERROR = 'network_error', 'Falha de comunicação'
+        TIMEOUT = 'timeout', 'Tempo limite excedido'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    event = models.OneToOneField(
+        Event,
+        verbose_name='evento',
+        on_delete=models.PROTECT,
+        related_name='delivery_attempt',
+    )
+    started_at = models.DateTimeField(
+        'iniciada em', default=timezone.now, editable=False,
+    )
+    finished_at = models.DateTimeField('finalizada em', null=True, blank=True)
+    http_status = models.PositiveSmallIntegerField(
+        'código HTTP',
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(200), MaxValueValidator(599)],
+    )
+    error_code = models.CharField(
+        'categoria de falha',
+        max_length=20,
+        choices=ErrorCode.choices,
+        default='',
+        blank=True,
+    )
+
+    class Meta:
+        ordering = ['-started_at']
+        verbose_name = 'tentativa de entrega'
+        verbose_name_plural = 'tentativas de entrega'
+        default_permissions = ('view',)
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(finished_at__isnull=True)
+                    | models.Q(finished_at__gte=models.F('started_at'))
+                ),
+                name='attempt_valid_timestamps',
+                violation_error_message=(
+                    'O término da tentativa não pode ser anterior ao início.'
+                ),
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        finished_at__isnull=True, http_status__isnull=True,
+                        error_code='',
+                    )
+                    | models.Q(
+                        finished_at__isnull=False, http_status__isnull=False,
+                        http_status__gte=200, http_status__lte=299, error_code='',
+                    )
+                    | models.Q(
+                        finished_at__isnull=False, http_status__isnull=False,
+                        http_status__gte=300, http_status__lte=599,
+                        error_code='http_error',
+                    )
+                    | models.Q(
+                        finished_at__isnull=False, http_status__isnull=True,
+                        error_code__in=['network_error', 'timeout'],
+                    )
+                ),
+                name='attempt_valid_result',
+                violation_error_message=(
+                    'Informe um resultado compatível com o término, '
+                    'o código HTTP e a categoria de falha.'
+                ),
+            ),
+        ]
+
+    def __str__(self):
+        return f'Tentativa - {self.event_id}'
