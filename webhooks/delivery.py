@@ -66,11 +66,6 @@ def _validate_public_ip(value):
 
 
 def resolve_destination(url):
-    """Validate every resolved address; no connection or database write is made.
-
-    DNS uses the system resolver, without an application-level total deadline.
-    The future HTTPS connection must use a returned IP, not resolve the host again.
-    """
     validate_webhook_url(url)
     parsed = urlsplit(url)
     try:
@@ -113,8 +108,6 @@ def _remaining_timeout(deadline):
 
 
 class _BoundedResponseReader(RawIOBase):
-    """Adapt the TLS socket to bounded input for Python's HTTP parser."""
-
     def __init__(self, sock):
         super().__init__()
         self.sock = sock
@@ -145,7 +138,6 @@ class _PinnedHTTPSConnection(HTTPSConnection):
     response_class = _BoundedHTTPResponse
 
     def __init__(self, destination):
-        # Prefer IPv4 when available; never retry another IP automatically.
         address = next(
             (ip for ip in destination.addresses if isinstance(ip, IPv4Address)),
             destination.addresses[0],
@@ -175,7 +167,6 @@ class _PinnedHTTPSConnection(HTTPSConnection):
             )
             tls_socket.settimeout(IO_TIMEOUT_SECONDS)
         except BaseException:
-            # Cleanup also applies to interruptions; the original error is raised.
             if tls_socket is not None:
                 tls_socket.close()
             else:
@@ -185,7 +176,6 @@ class _PinnedHTTPSConnection(HTTPSConnection):
 
 
 def post_json(url, data):
-    """Send a validated JSON object once; return metadata without database writes."""
     try:
         if not isinstance(data, dict):
             raise TypeError
