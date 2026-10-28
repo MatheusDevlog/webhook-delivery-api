@@ -1,6 +1,9 @@
 import socket
+import ssl
 from dataclasses import dataclass
+from http.client import HTTPSConnection
 from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
+from time import monotonic
 from urllib.parse import quote, urlsplit
 
 from django.core.exceptions import ValidationError
@@ -9,6 +12,8 @@ from .validators import validate_webhook_url
 
 
 PUBLIC_IPV6_NETWORK = ip_network('2000::/3')
+CONNECT_TIMEOUT_SECONDS = 3
+IO_TIMEOUT_SECONDS = 5
 
 
 @dataclass(frozen=True)
@@ -82,3 +87,51 @@ def resolve_destination(url):
         path=quote(parsed.path or '/', safe="/%:@!$&'()*+,;=-._~"),
         addresses=addresses,
     )
+
+
+def _remaining_timeout(deadline):
+    remaining = deadline - monotonic()
+    if remaining <= 0:
+        raise TimeoutError('O tempo limite da conexão foi excedido.')
+    return remaining
+
+
+class _PinnedHTTPSConnection(HTTPSConnection):
+    def __init__(self, destination):
+        # Prefer IPv4 when available; never retry another IP automatically.
+        address = next(
+            (ip for ip in destination.addresses if isinstance(ip, IPv4Address)),
+            destination.addresses[0],
+        )
+        self.address = _validate_public_ip(address)
+        self.tls_context = ssl.create_default_context()
+        self.tls_context.set_alpn_protocols(['http/1.1'])
+        super().__init__(
+            destination.hostname, 443,
+            timeout=IO_TIMEOUT_SECONDS, context=self.tls_context,
+        )
+
+    def connect(self):
+        deadline = monotonic() + CONNECT_TIMEOUT_SECONDS
+        family = socket.AF_INET if self.address.version == 4 else socket.AF_INET6
+        target = (str(self.address), 443)
+        if family == socket.AF_INET6:
+            target = (*target, 0, 0)
+        raw_socket = socket.socket(family, socket.SOCK_STREAM)
+        tls_socket = None
+        try:
+            raw_socket.settimeout(_remaining_timeout(deadline))
+            raw_socket.connect(target)
+            raw_socket.settimeout(_remaining_timeout(deadline))
+            tls_socket = self.tls_context.wrap_socket(
+                raw_socket, server_hostname=self.host,
+            )
+            tls_socket.settimeout(IO_TIMEOUT_SECONDS)
+        except BaseException:
+            # Cleanup also applies to interruptions; the original error is raised.
+            if tls_socket is not None:
+                tls_socket.close()
+            else:
+                raw_socket.close()
+            raise
+        self.sock = tls_socket
