@@ -30,6 +30,7 @@ def event(settings):
     (200, ''), (204, ''), (299, ''),
     (302, 'http_error'), (400, 'http_error'), (500, 'http_error'), (599, 'http_error'),
     (None, 'network_error'), (None, 'timeout'),
+    (None, 'destination_rejected'),
 ])
 def test_persists_completed_attempt_results(event, http_status, error_code):
     attempt = DeliveryAttempt(
@@ -84,6 +85,8 @@ def test_completes_the_existing_attempt_without_creating_another(event):
     (True, 200, 'http_error'), (True, 500, ''), (True, 302, ''),
     (True, 500, 'network_error'), (True, 200, 'timeout'),
     (True, None, 'unexpected_error'), (True, 199, ''), (True, 600, 'http_error'),
+    (False, None, 'destination_rejected'),
+    (True, 200, 'destination_rejected'), (True, 500, 'destination_rejected'),
 ])
 def test_rejects_inconsistent_results_in_validation_and_database(
     event, finished, http_status, error_code,

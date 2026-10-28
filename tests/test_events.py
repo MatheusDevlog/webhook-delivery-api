@@ -1,7 +1,7 @@
 import uuid
 
 import pytest
-from django.core.exceptions import ValidationError
+from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.db import IntegrityError, connection, transaction
 from django.db.models.deletion import ProtectedError
 
@@ -129,13 +129,37 @@ def test_destination_with_event_cannot_be_deleted(endpoint):
 
 
 @pytest.mark.django_db
-def test_database_rejects_unsupported_event_status(endpoint):
+def test_rejects_unsupported_event_status_in_validation_and_database(endpoint):
+    event = Event(
+        endpoint=endpoint, event_type='pedido.pago', payload={}, status='unknown',
+    )
+    with pytest.raises(ValidationError) as error:
+        event.full_clean()
+
+    assert error.value.error_dict[NON_FIELD_ERRORS][0].code == 'invalid_event_status'
+
     with pytest.raises(IntegrityError), transaction.atomic():
         Event.objects.create(
-            endpoint=endpoint, event_type='pedido.pago', payload={}, status='delivered',
+            endpoint=endpoint, event_type='pedido.pago', payload={}, status='unknown',
         )
 
     assert not Event.objects.exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('status', ['sending', 'delivered', 'failed'])
+def test_persists_supported_delivery_statuses(endpoint, status):
+    event = Event(
+        endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 123},
+        status=status,
+    )
+    event.full_clean()
+    event.save()
+    event.refresh_from_db()
+
+    assert event.status == status
+    assert event.endpoint_id == endpoint.pk
+    assert event.payload == {'pedido_id': 123}
 
 
 @pytest.mark.django_db
