@@ -98,7 +98,6 @@ def test_rejects_inconsistent_results_in_validation_and_database(
     with pytest.raises(ValidationError):
         DeliveryAttempt(**values).full_clean()
 
-    # Direct ORM writes skip full_clean(); PostgreSQL must still reject the row.
     with pytest.raises(IntegrityError), transaction.atomic():
         DeliveryAttempt.objects.create(**values)
 

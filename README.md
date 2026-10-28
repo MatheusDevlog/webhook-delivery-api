@@ -4,7 +4,7 @@ Projeto de backend para registrar eventos, enviar webhooks a destinos autorizado
 
 ## Estado atual
 
-A aplicação usa Django e DRF, com PostgreSQL e execução local por Docker Compose. Existe uma rota de saúde, cadastro de destinos autorizados pelo admin Django, endpoints restritos para registrar e consultar eventos e um modelo para armazenar tentativas de entrega, com testes automatizados. O envio de webhooks e a demonstração interativa ainda não foram implementados.
+A aplicação usa Django e DRF, com PostgreSQL e execução local por Docker Compose. Existe uma rota de saúde, cadastro de destinos autorizados pelo admin Django, endpoints restritos para registrar e consultar eventos, um modelo para armazenar tentativas e transporte HTTPS interno, com testes automatizados. A integração do transporte com tentativas/estados, a rota de envio e a demonstração interativa ainda não foram implementadas.
 
 A base está publicada na Vercel. A conexão ao PostgreSQL no Neon foi verificada pelo terminal com criptografia exigida, e a consulta pela aplicação hospedada foi verificada pelo fluxo de autenticação do admin. Cada ambiente precisa das migrations correspondentes ao código publicado; não presuma que gerar ou aplicar uma migration localmente atualiza o Neon.
 
@@ -66,7 +66,7 @@ WEBHOOK_ALLOWED_URLS=https://receiver.example/webhook
 
 A validação exige HTTPS e porta padrão (`443`, explícita ou implícita), sem credenciais, query string ou fragmento. Rejeita nomes locais/internos conhecidos e IPs literais não públicos em IPv4/IPv6, mesmo que apareçam na lista permitida. O formulário do admin assume HTTPS se o protocolo for omitido; o valor final ainda precisa corresponder exatamente à lista.
 
-O cadastro não resolve DNS nem faz chamada de teste ao receptor. Essas regras não constituem proteção completa contra SSRF: DNS e destino efetivo da conexão precisarão ser verificados novamente antes de existir envio real. Retirar uma URL da configuração não apaga registros existentes. [Referência de segurança OWASP](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html).
+O cadastro não resolve DNS nem faz chamada de teste ao receptor. A validação de cadastro isolada não constitui proteção completa contra SSRF; o transporte interno acrescenta as verificações de DNS/IP descritas abaixo. Retirar uma URL da configuração não apaga registros existentes. [Referência de segurança OWASP](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html).
 
 Com o `.env` preparado, inicialize os serviços e aplique as migrations locais:
 
@@ -85,7 +85,7 @@ Escolha credenciais próprias e não as versione nem reutilize na hospedagem. Ab
 
 O admin exige usuário ativo da equipe (`is_staff`) e a permissão correspondente: `add_webhookendpoint` para cadastrar e `view_webhookendpoint` para consultar. Um superusuário tem essas permissões; um usuário comum ou da equipe sem a permissão necessária não ganha acesso. Edição e exclusão ficam bloqueadas no admin, inclusive para superusuários; não há ações em lote. Listagem, pesquisa, filtro por tipo e detalhe para consulta estão disponíveis.
 
-O formulário usa as validações do modelo. Em scripts que escrevam diretamente pelo ORM, chame `full_clean()` antes de `save()`; o Django não faz essa validação automaticamente no `save()`. A restrição de duplicidade continua sendo aplicada pelo banco. Não há endpoint REST de cadastro de destinos. As rotas de eventos possuem política explícita de acesso, descrita abaixo; operações de envio ainda não existem. [Validação de modelos no Django](https://docs.djangoproject.com/en/5.2/ref/models/instances/#validating-objects).
+O formulário usa as validações do modelo. Em scripts que escrevam diretamente pelo ORM, chame `full_clean()` antes de `save()`; o Django não faz essa validação automaticamente no `save()`. A restrição de duplicidade continua sendo aplicada pelo banco. Não há endpoint REST de cadastro de destinos. As rotas de eventos possuem política explícita de acesso, descrita abaixo; a rota de envio ainda não existe. [Validação de modelos no Django](https://docs.djangoproject.com/en/5.2/ref/models/instances/#validating-objects).
 
 Na Vercel, aplique a migration no banco Neon e configure `WEBHOOK_ALLOWED_URLS` em Production antes de usar o cadastro. A configuração local e a criação de um superusuário local não alteram o ambiente hospedado. O fluxo de publicação automática usa somente a `main`; não há banco de Preview neste projeto.
 
@@ -135,6 +135,39 @@ O término não pode ser anterior ao início. Por exemplo, uma resposta 500 exig
 `full_clean()` verifica as regras antes de salvar, e as restrições do PostgreSQL também protegem escritas que pulem essa validação. Não há armazenamento de corpo/headers da resposta nem de texto livre de exceções. O modelo gera somente a permissão de consulta; não está registrado no admin e não possui rota ou serializer próprios.
 
 Nesta etapa, cadastrar um evento não cria uma tentativa. O modelo apenas prepara a persistência; não faz HTTP, não coordena transações ou concorrência e não altera `Event.status`, que continua `pending`. Um registro sem término representa resultado ainda não registrado, inclusive se a execução futura for interrompida; não autoriza recuperação ou novo envio automático.
+
+## Transporte HTTPS interno
+
+`webhooks/delivery.py` contém `post_json(url, data)`, que recebe uma URL e um objeto JSON, faz um único POST HTTPS e devolve `DeliveryResult(http_status, error_code)`. O transporte não consulta ou grava eventos/tentativas e não está ligado às views. Registrar um evento continua criando somente `Event` com estado `pending`.
+
+O chamador deve validar os dados de negócio e montar o objeto enviado; o contrato do envelope de um evento será definido na integração com o envio. O transporte codifica esse objeto em JSON compacto UTF-8 e limita o corpo completo a 17 KiB, reservando espaço para metadados além dos 16 KiB de payload permitidos na API. JSON inválido ou corpo maior que esse limite gera `ValidationError` antes do DNS.
+
+O fluxo interno é: revalidar URL autorizada → resolver domínio → conferir IPs → conectar ao IP aprovado → negociar TLS para o domínio original → POST → ler o resultado.
+
+- `resolve_destination()` reaproveita a validação da URL e verifica todos os IPs retornados pelo resolvedor. Qualquer IP proibido bloqueia o destino inteiro, inclusive em respostas que misturem IP público e privado. IP literal público autorizado dispensa DNS.
+- A política exige IP global, sem multicast/reservados. IPv6 fica restrito a endereços nativos públicos em `2000::/3`, sem identificador de interface, IPv4 mapeado ou mecanismos de transição. Domínios incompatíveis com a conversão IDNA são rejeitados.
+- A conexão usa diretamente um IP aprovado, preferindo IPv4 quando disponível; não consulta o domínio novamente nem tenta outro IP automaticamente. O domínio original continua sendo usado na verificação do certificado TLS.
+- Método e headers são definidos pela aplicação. O cliente não usa proxy do ambiente, não encaminha cookies/credenciais recebidos e não segue redirecionamentos. Não há retry.
+
+| Resultado | `http_status` | `error_code` |
+| --- | --- | --- |
+| Resposta HTTP de sucesso | 200–299 | Texto vazio |
+| Resposta HTTP sem sucesso, incluindo redirecionamento | 300–599 | `http_error` |
+| Prazo excedido na conexão, escrita ou leitura | `None` | `timeout` |
+| Falha de DNS, rede, TLS ou protocolo HTTP | `None` | `network_error` |
+
+URL desautorizada, IP proibido ou domínio inválido gera `ValidationError` para o chamador. Essas rejeições não são respostas HTTP do destinatário. O resultado contém somente código HTTP e categoria; corpo, headers e detalhes brutos de exceções não são retornados ou persistidos. Uma resposta 2xx não comprova o processamento interno do receptor; timeout não comprova que ele deixou de receber o aviso.
+
+| Limite | Comportamento |
+| --- | --- |
+| TCP e negociação TLS | Compartilham um prazo de 3 segundos. |
+| Escrita | Timeout de 5 segundos por operação. |
+| Leitura da resposta | Prazo de 5 segundos para a fase e cota de 16 KiB, mesmo com chegada contínua de bytes. |
+| DNS | Usa o resolvedor do sistema, sem prazo total próprio na aplicação. |
+
+O parser HTTP é o da biblioteca padrão Python. Um leitor limitado controla tempo e bytes; o corpo da resposta não é consumido integralmente. O buffer pode antecipar alguns bytes do corpo, sempre dentro da cota. Não há limite global que inclua DNS e todas as fases do envio. [Cliente HTTP do Python](https://docs.python.org/3.14/library/http.client.html).
+
+O comportamento foi verificado com rede/DNS/TLS simulados e parser HTTP real. A entrega a um receptor real controlado ainda não foi verificada. Antes de expor envio, faltam a coordenação de tentativa/estado/concorrência, acesso, limites de uso, orçamento global e retenção; essa função interna, sozinha, não é uma demonstração pública de webhooks.
 
 ## Registro e consulta de eventos
 
@@ -442,6 +475,10 @@ Com `STATIC_ROOT` configurado, a Vercel executa a coleta automaticamente durante
 `tests/test_event_api.py` cobre registro/consulta HTTP, rejeições representativas de entrada, JSON incorreto, formato do contrato, perfis e permissões de acesso, CSRF, métodos rejeitados e repetição de cadastros. Um teste usa login com senha e HTTPS simulado para exercitar sessão, CSRF e cookies Secure; os demais testes de autorização isolam as permissões com `force_login`. Nenhuma conta permanente ou credencial hospedada é criada por essa suíte.
 
 `tests/test_delivery_attempts.py` cobre início e conclusão de uma tentativa, resultados HTTP e falhas sem resposta, limite de uma tentativa por evento, referência obrigatória a um evento existente e proteção contra sua exclusão. Verifica rejeição de horários e resultados incoerentes tanto por `full_clean()` quanto pelo PostgreSQL em escrita direta. Os resultados são dados simulados; não há envio HTTP externo.
+
+`tests/test_delivery_destination.py` verifica revalidação da URL, IPs públicos/proibidos, respostas DNS mistas, mudanças de DNS e preparação de domínio/caminho. O resolvedor é simulado, sem consultas externas ou acesso ao banco.
+
+`tests/test_delivery_http.py` usa sockets/TLS simulados e o parser HTTP real do Python para verificar conexão ao IP aprovado com hostname original, falhas de certificado/rede/timeout, limpeza dos recursos, POST JSON, headers definidos pela aplicação, redirecionamentos bloqueados e limites de tempo/bytes. Isso não comprova handshake TLS nem entrega a um receptor real. Esses testes não acessam o banco.
 
 Após instalar as dependências de desenvolvimento, confirme a instalação:
 

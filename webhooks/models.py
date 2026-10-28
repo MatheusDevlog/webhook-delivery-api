@@ -60,7 +60,6 @@ class Event(models.Model):
     event_type = models.CharField(
         'tipo de evento', max_length=100, validators=[validate_event_type],
     )
-    # clean() validates empty values too, accepting {} but rejecting [] and null.
     payload = models.JSONField('dados do evento', blank=True)
     status = models.CharField(
         'estado',
