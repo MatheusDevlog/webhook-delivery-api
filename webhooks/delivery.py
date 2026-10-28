@@ -1,19 +1,23 @@
+import json
 import socket
 import ssl
 from dataclasses import dataclass
-from http.client import HTTPSConnection
+from http.client import HTTPException, HTTPResponse, HTTPSConnection
+from io import BufferedReader, RawIOBase
 from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
 from time import monotonic
 from urllib.parse import quote, urlsplit
 
 from django.core.exceptions import ValidationError
 
-from .validators import validate_webhook_url
+from .validators import MAX_EVENT_PAYLOAD_BYTES, validate_webhook_url
 
 
 PUBLIC_IPV6_NETWORK = ip_network('2000::/3')
 CONNECT_TIMEOUT_SECONDS = 3
 IO_TIMEOUT_SECONDS = 5
+MAX_REQUEST_BYTES = MAX_EVENT_PAYLOAD_BYTES + 1024
+MAX_RESPONSE_BYTES = 16 * 1024
 
 
 @dataclass(frozen=True)
@@ -21,6 +25,12 @@ class ResolvedDestination:
     hostname: str
     path: str
     addresses: tuple[IPv4Address | IPv6Address, ...]
+
+
+@dataclass(frozen=True)
+class DeliveryResult:
+    http_status: int | None
+    error_code: str
 
 
 class DeliveryError(Exception):
@@ -63,7 +73,13 @@ def resolve_destination(url):
     """
     validate_webhook_url(url)
     parsed = urlsplit(url)
-    hostname = parsed.hostname.rstrip('.').encode('idna').decode('ascii')
+    try:
+        hostname = parsed.hostname.rstrip('.').encode('idna').decode('ascii')
+    except UnicodeError:
+        raise ValidationError(
+            'O domínio do destino não pode ser convertido para DNS.',
+            code='invalid_destination_hostname',
+        ) from None
 
     try:
         ip_address(hostname)
@@ -96,7 +112,38 @@ def _remaining_timeout(deadline):
     return remaining
 
 
+class _BoundedResponseReader(RawIOBase):
+    """Adapt the TLS socket to bounded input for Python's HTTP parser."""
+
+    def __init__(self, sock):
+        super().__init__()
+        self.sock = sock
+        self.deadline = monotonic() + IO_TIMEOUT_SECONDS
+        self.remaining = MAX_RESPONSE_BYTES
+
+    def readable(self):
+        return True
+
+    def makefile(self, mode):
+        return BufferedReader(self)
+
+    def readinto(self, buffer):
+        if self.remaining <= 0:
+            raise HTTPException('O limite de leitura da resposta foi excedido.')
+        self.sock.settimeout(_remaining_timeout(self.deadline))
+        received = self.sock.recv_into(memoryview(buffer)[:self.remaining])
+        self.remaining -= received
+        return received
+
+
+class _BoundedHTTPResponse(HTTPResponse):
+    def __init__(self, sock, *args, **kwargs):
+        super().__init__(_BoundedResponseReader(sock), *args, **kwargs)
+
+
 class _PinnedHTTPSConnection(HTTPSConnection):
+    response_class = _BoundedHTTPResponse
+
     def __init__(self, destination):
         # Prefer IPv4 when available; never retry another IP automatically.
         address = next(
@@ -135,3 +182,48 @@ class _PinnedHTTPSConnection(HTTPSConnection):
                 raw_socket.close()
             raise
         self.sock = tls_socket
+
+
+def post_json(url, data):
+    """Send a validated JSON object once; return metadata without database writes."""
+    try:
+        if not isinstance(data, dict):
+            raise TypeError
+        body = json.dumps(
+            data, ensure_ascii=False, allow_nan=False, separators=(',', ':'),
+        ).encode('utf-8')
+    except (TypeError, ValueError, RecursionError):
+        raise ValidationError(
+            'O corpo do envio deve ser um objeto JSON válido.',
+            code='invalid_delivery_body',
+        ) from None
+    if len(body) > MAX_REQUEST_BYTES:
+        raise ValidationError(
+            'O corpo do envio não pode exceder 17 KiB em UTF-8.',
+            code='delivery_body_too_large',
+        )
+
+    connection = None
+    try:
+        destination = resolve_destination(url)
+        connection = _PinnedHTTPSConnection(destination)
+        connection.request('POST', destination.path, body=body, headers={
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'User-Agent': 'WebhookDeliveryService/0.1',
+            'Connection': 'close',
+        })
+        with connection.getresponse() as response:
+            if not 200 <= response.status <= 599:
+                raise HTTPException('Código HTTP final não suportado.')
+            error_code = '' if response.status < 300 else 'http_error'
+            return DeliveryResult(response.status, error_code)
+    except DeliveryError as error:
+        return DeliveryResult(None, error.code)
+    except TimeoutError:
+        return DeliveryResult(None, 'timeout')
+    except (OSError, HTTPException):
+        return DeliveryResult(None, 'network_error')
+    finally:
+        if connection is not None:
+            connection.close()
