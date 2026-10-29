@@ -17,10 +17,21 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 
+from webhooks.receivers import DemoReceiver
+
 from .views import health
 
 urlpatterns = [
     path('api/saude/', health, name='health'),
     path('api/', include('webhooks.urls')),
     path('admin/', admin.site.urls),
+    path(
+        'demonstracao/receptor/sucesso/', DemoReceiver.as_view(),
+        name='demo-receiver-success',
+    ),
+    path(
+        'demonstracao/receptor/falha/',
+        DemoReceiver.as_view(response_status=500, result='rejected'),
+        name='demo-receiver-failure',
+    ),
 ]

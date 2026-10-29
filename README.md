@@ -8,7 +8,7 @@ Exemplo: uma loja registra `pedido.pago` com o ID de um pedido, solicita o envio
 
 **Stack:** Python 3.14, Django 5.2, DRF, PostgreSQL 17, Docker Compose e pytest. Uma aplicação Django, com execução síncrona e uma tentativa por evento.
 
-**Em desenvolvimento:** as operações estão implementadas e testadas com transporte simulado. A entrega a um receptor real e a demonstração para visitantes ainda estão pendentes. Envios ficam desabilitados por padrão.
+**Em desenvolvimento:** o fluxo de envio tem testes com transporte simulado; a verificação HTTPS ponta a ponta e a interface para visitantes estão pendentes. Envios e receptores de demonstração ficam desabilitados por padrão.
 
 [Saúde da base publicada](https://webhook-delivery-api.vercel.app/api/saude/) — confirma que a aplicação responde; não verifica banco ou entrega de webhooks. Ainda não há página inicial em `/`.
 
@@ -64,7 +64,7 @@ Se o banco já foi preparado pelo Docker, reaproveite as migrations e o usuário
 
 ## Usar a API
 
-As operações de webhooks exigem sessão Django, usuário ativo da equipe e a permissão indicada. POST autenticado exige CSRF. Use a interface DRF no navegador após entrar no admin ou o Bruno API Client com cookies de sessão e CSRF; envie os corpos como JSON.
+As operações de eventos e tentativas exigem sessão Django, usuário ativo da equipe e a permissão indicada. POST autenticado exige CSRF. Use a interface DRF no navegador após entrar no admin ou o Bruno API Client com cookies de sessão e CSRF; envie os corpos como JSON.
 
 | Método | Rota | Resultado | Permissão |
 | --- | --- | --- | --- |
@@ -113,6 +113,21 @@ A tentativa apresenta `id`, `event_id`, `event_status`, `started_at`, `finished_
 | `503` | Envio desabilitado ou reserva temporariamente ocupada. |
 | `500` | Falha interna; consulte a tentativa antes de outra ação. |
 
+## Receptores de demonstração
+
+Representam o sistema destinatário dentro da mesma aplicação Django:
+
+| Método | Rota | Resposta com envelope válido |
+| --- | --- | --- |
+| POST | `/demonstracao/receptor/sucesso/` | `200`, `status: received` |
+| POST | `/demonstracao/receptor/falha/` | `500` controlado, `status: rejected` |
+
+Desativados por padrão, retornam `404`. `WEBHOOK_DEMO_RECEIVER_ENABLED=True` habilita ambos, sem login ou CSRF. Essa opção não altera as permissões das operações de eventos e tentativas.
+
+Exigem envelope JSON UTF-8 com `id` UUID, `created_at` válido, `event_type: pedido.pago` e `payload: {"pedido_id": 123}`, sem campos extras. A resposta inclui `event_id`; o corpo é limitado a 17 KiB. Dados inválidos retornam `400`, outros métodos `405`, excesso de tamanho `413` e formato incompatível `415`.
+
+Os receptores não gravam dados nem fazem envios. Para uma entrega HTTPS, cadastre a URL pública exata em `WEBHOOK_ALLOWED_URLS` e no admin, prepare um orçamento positivo e siga o fluxo da API. A ativação dos receptores sozinha não libera envios. Chamadas pela internet consomem recursos da hospedagem; a verificação desse percurso ainda está pendente.
+
 ## Segurança e limites
 
 - **Destinos controlados:** `WEBHOOK_ALLOWED_URLS` contém URLs HTTPS completas e exatas, separadas por vírgulas. Vazia bloqueia cadastro e envio. Só use receptores que controla ou tem autorização para usar.
@@ -133,7 +148,7 @@ docker compose exec api python manage.py check
 docker compose exec api python -m pytest -q
 ```
 
-A suíte cobre validações, permissões, CSRF, persistência, falhas, concorrência, cotas e retenção. Usa PostgreSQL local em banco separado e transporte/DNS/TLS simulados; não comprova entrega real. Não execute os testes com a configuração do Neon.
+A suíte cobre validações, permissões, CSRF, persistência, falhas, concorrência, cotas, retenção e os dois receptores. Usa PostgreSQL local em banco separado e transporte/DNS/TLS simulados; não comprova entrega real. Não execute os testes com a configuração do Neon.
 
 ## Retenção de dados
 
@@ -155,7 +170,7 @@ Configure em Production: chave Django própria, `DJANGO_DEBUG=False`, domínio e
 
 ## Fora do MVP
 
-Retry automático, assinatura HMAC, chave de idempotência, filas e processamento em segundo plano ficam para evolução. O serviço permanece restrito ao operador até a preparação da demonstração com receptores controlados.
+Retry automático, assinatura HMAC, chave de idempotência, filas e processamento em segundo plano ficam para evolução. Cadastro de destinos, registro de eventos e solicitação de envio permanecem restritos ao operador.
 
 ## Licença
 
