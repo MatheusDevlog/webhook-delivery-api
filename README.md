@@ -1,543 +1,161 @@
 # Webhook Delivery Service
 
-Projeto de backend para registrar eventos, enviar webhooks a destinos autorizados e consultar o resultado das tentativas de entrega.
+API para registrar eventos, enviar webhooks por HTTPS a destinos autorizados e consultar o resultado das tentativas.
 
-## Estado atual
+Exemplo: uma loja registra `pedido.pago` com o ID de um pedido, solicita o envio ao receptor e consulta o resultado.
 
-A aplicação usa Django e DRF, com PostgreSQL e execução local por Docker Compose. Existe uma rota de saúde, cadastro de destinos autorizados pelo admin Django, endpoints restritos para registrar e consultar eventos e coordenação interna de entrega com transporte HTTPS, persistência das tentativas e atualização de estados, com testes automatizados. A rota de envio e a demonstração interativa ainda não foram implementadas; a entrega a um receptor real ainda não foi verificada.
+**Fluxo:** cadastrar destino no admin → registrar evento → solicitar envio → consultar tentativa.
 
-A base está publicada na Vercel. A conexão ao PostgreSQL no Neon foi verificada pelo terminal com criptografia exigida, e a consulta pela aplicação hospedada foi verificada pelo fluxo de autenticação do admin. Cada ambiente precisa das migrations correspondentes ao código publicado; não presuma que gerar ou aplicar uma migration localmente atualiza o Neon.
+**Stack:** Python 3.14, Django 5.2, DRF, PostgreSQL 17, Docker Compose e pytest. Uma aplicação Django, com execução síncrona e uma tentativa por evento.
 
-O MVP planejado terá uma tentativa síncrona por evento, registro do resultado HTTP e consulta do estado. A demonstração usará dados fictícios e receptores controlados.
+**Em desenvolvimento:** as operações estão implementadas e testadas com transporte simulado. A entrega a um receptor real e a demonstração para visitantes ainda estão pendentes. Envios ficam desabilitados por padrão.
 
-## Tecnologias
+[Saúde da base publicada](https://webhook-delivery-api.vercel.app/api/saude/) — confirma que a aplicação responde; não verifica banco ou entrega de webhooks. Ainda não há página inicial em `/`.
 
-- Python, Django e Django REST Framework.
-- PostgreSQL, com Docker Compose no desenvolvimento local.
-- pytest e pytest-django para testes.
-- Neon Free para o banco hospedado e Vercel Hobby para a publicação inicial da aplicação.
+## Executar localmente
 
-## Base publicada
+Requisito: Docker com Compose. Comandos para Bash, na raiz do repositório após cloná-lo:
 
-Acesse a [rota de saúde publicada](https://webhook-delivery-api.vercel.app/api/saude/). No navegador, a interface padrão do DRF apresenta a resposta HTTP `200` com o conteúdo:
-
-```json
-{"status": "ok"}
+```bash
+cp .env.example .env
 ```
 
-Para consultar pelo Bruno API Client, ferramenta para testar APIs, use `GET` nessa mesma URL, sem autenticação e sem corpo, com o header `Accept: application/json`. A resposta será JSON. `POST` nessa rota retorna `405`.
+Antes da primeira inicialização, preencha `DJANGO_SECRET_KEY` e `POSTGRES_PASSWORD` no seu `.env` com valores próprios. Para gerar dois valores aleatórios:
 
-A saúde pública foi verificada no navegador. Ela confirma que a aplicação responde, sem consultar o banco nem realizar envios externos. O endereço `/` ainda não possui página inicial. Este link permite explorar a base publicada; o fluxo de webhooks ainda está em desenvolvimento.
-
-A publicação usa variáveis configuradas na Vercel em **Production**: chave Django própria, `DJANGO_DEBUG=False`, `DJANGO_ALLOWED_HOSTS=webhook-delivery-api.vercel.app` e as opções `POSTGRES_*` do Neon, com `POSTGRES_SSLMODE=require`. Senhas e chaves não são versionadas. O projeto adota publicação automática somente da `main`, conforme a configuração abaixo.
-
-Em 17/10/2026, uma tentativa de login no admin publicado com dados fictícios retornou a mensagem padrão de credenciais inválidas. Na configuração padrão usada aqui, essa resposta ocorre após consultar o usuário no banco: confirma uma leitura pela aplicação hospedada, sem comprovar login autorizado ou gravação de dados. Apenas abrir o formulário não seria suficiente.
-
-Após a publicação da PR #3, a saúde e o login do admin retornaram `200`, e a resposta do login apresentou o cookie `csrftoken` com o atributo `Secure`. O cookie de sessão ainda não foi observado em acesso autenticado. O sucesso da saúde não substitui verificações de segurança nem de acesso ao banco.
-
-### Publicação automática somente da main
-
-O arquivo `vercel.json`, na raiz, configura `git.deploymentEnabled` com `"**": false` e `"main": true`. A primeira regra desativa deploys automáticos para todas as branches, incluindo nomes com `/`; a exceção mantém o deploy automático da `main`. Quando mais de uma regra corresponde à branch, uma regra com `true` permite a publicação. [Configuração Git da Vercel](https://vercel.com/docs/project-configuration/git-configuration#git.deploymentenabled).
-
-Branches de trabalho são verificadas localmente antes da PR. Depois do merge na `main`, a integração Git da Vercel publica a aplicação em Production. Não é mantido um ambiente Preview nem um banco adicional para ele. Essa escolha reduz a configuração do MVP; problemas específicos da hospedagem podem aparecer somente após o merge, por isso a publicação precisa ser conferida a cada entrega.
-
-A regra controla os deploys automáticos disparados pela integração Git. Ela não apaga publicações antigas nem impede deploys manuais. Ao enviar essa configuração, confirme que o push da branch de trabalho não gera um novo Preview; após o merge, confira o deploy da `main` em Production e a resposta da saúde. Essas verificações na plataforma não são substituídas pela validação local do JSON.
-
-## Cadastro de destinos no admin
-
-O aplicativo `webhooks` possui o modelo `WebhookEndpoint`. Após aplicar a migration `webhooks/0001_initial`, cada registro guarda:
-
-| Campo | Finalidade |
-| --- | --- |
-| `id` | UUID gerado pela aplicação, sem edição no formulário. |
-| `url` | URL HTTPS autorizada do receptor, limitada a 2048 bytes em UTF-8. |
-| `event_type` | Tipo de evento com até 100 caracteres, como `pedido.pago`. |
-| `created_at` | Data e hora do cadastro, preenchidas automaticamente. |
-
-Uma mesma URL pode atender a tipos de evento diferentes. A combinação `url` + `event_type` é única, com restrição no PostgreSQL. O tipo deve ter duas ou mais partes separadas por pontos; cada parte começa com uma letra minúscula ASCII e pode conter letras minúsculas, números e `_`.
-
-O operador define URLs exatas permitidas em `WEBHOOK_ALLOWED_URLS`, separadas por vírgulas. Vazio ou ausente bloqueia novos cadastros. No `.env` local, um exemplo fictício para explorar somente o cadastro é:
-
-```ini
-WEBHOOK_ALLOWED_URLS=https://receiver.example/webhook
+```bash
+docker run --rm python:3.14-slim-bookworm python -c \
+"import secrets; print('DJANGO_SECRET_KEY=' + secrets.token_urlsafe(50)); print('POSTGRES_PASSWORD=' + secrets.token_urlsafe(32))"
 ```
 
-`receiver.example` é ilustrativo, não um receptor funcional. Para uso real, configure somente receptores que você controla ou tem autorização para usar. Os valores são URLs completas, não domínios ou padrões: uma URL permitida não autoriza outros caminhos, subdomínios ou variações. Uma vírgula literal na URL deve ser codificada como `%2C` para não ser interpretada como separador da configuração.
-
-A validação exige HTTPS e porta padrão (`443`, explícita ou implícita), sem credenciais, query string ou fragmento. Rejeita nomes locais/internos conhecidos e IPs literais não públicos em IPv4/IPv6, mesmo que apareçam na lista permitida. O formulário do admin assume HTTPS se o protocolo for omitido; o valor final ainda precisa corresponder exatamente à lista.
-
-O cadastro não resolve DNS nem faz chamada de teste ao receptor. A validação de cadastro isolada não constitui proteção completa contra SSRF; o transporte interno acrescenta as verificações de DNS/IP descritas abaixo. Retirar uma URL da configuração não apaga registros existentes. [Referência de segurança OWASP](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html).
-
-Com o `.env` preparado, inicialize os serviços e aplique as migrations locais:
+Copie os valores gerados para o `.env` e mantenha as demais opções locais de [.env.example](.env.example). Depois:
 
 ```bash
 docker compose up -d --build --wait --wait-timeout 60
 docker compose exec api python manage.py migrate
-```
-
-Para criar seu acesso administrativo local, use o comando interativo oficial:
-
-```bash
 docker compose exec api python manage.py createsuperuser
 ```
 
-Escolha credenciais próprias e não as versione nem reutilize na hospedagem. Abra `http://127.0.0.1:8000/admin/`, faça login e entre em **Webhooks → Destinos de webhook → Adicionar**. A lista fica em `/admin/webhooks/webhookendpoint/` e o formulário em `/admin/webhooks/webhookendpoint/add/`. Preencha a URL autorizada e `pedido.pago` e salve; o registro aparecerá na lista, com UUID e data. Não há disparo de evento ou envio HTTP nesse processo.
+Acesse a [saúde local](http://127.0.0.1:8000/api/saude/) e o [admin local](http://127.0.0.1:8000/admin/) com o usuário criado. O Compose inicia a API e o PostgreSQL; não é necessário ativar uma `.venv` nesse fluxo.
 
-O admin exige usuário ativo da equipe (`is_staff`) e a permissão correspondente: `add_webhookendpoint` para cadastrar e `view_webhookendpoint` para consultar. Um superusuário tem essas permissões; um usuário comum ou da equipe sem a permissão necessária não ganha acesso. Edição e exclusão ficam bloqueadas no admin, inclusive para superusuários; não há ações em lote. Listagem, pesquisa, filtro por tipo e detalhe para consulta estão disponíveis.
+Após alterar código ou `.env`, repita `docker compose up -d --build --wait --wait-timeout 60`; o código fica copiado na imagem. `docker compose down` para os containers e preserva o volume do banco. Alterar a senha no `.env` não altera a senha de um banco já inicializado.
 
-O formulário usa as validações do modelo. Em scripts que escrevam diretamente pelo ORM, chame `full_clean()` antes de `save()`; o Django não faz essa validação automaticamente no `save()`. A restrição de duplicidade continua sendo aplicada pelo banco. Não há endpoint REST de cadastro de destinos. As rotas de eventos possuem política explícita de acesso, descrita abaixo; a rota de envio ainda não existe. [Validação de modelos no Django](https://docs.djangoproject.com/en/5.2/ref/models/instances/#validating-objects).
+<details>
+<summary>Alternativa: Django na .venv, com Python 3.14 instalado</summary>
 
-Na Vercel, aplique a migration no banco Neon e configure `WEBHOOK_ALLOWED_URLS` em Production antes de usar o cadastro. A configuração local e a criação de um superusuário local não alteram o ambiente hospedado. O fluxo de publicação automática usa somente a `main`; não há banco de Preview neste projeto.
+Use somente o banco no Compose neste modo. Com o `.env` local preparado:
 
-## Modelo de eventos
+```bash
+docker compose stop api
+docker compose up -d --wait --wait-timeout 60 db
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+set -a
+source .env
+set +a
+python manage.py migrate
+python manage.py createsuperuser
+python manage.py runserver
+```
 
-O modelo `Event` representa um aviso destinado a um único `WebhookEndpoint`. Por exemplo, um evento `pedido.pago` pode guardar `{"pedido_id": 123}` em `payload`. A migration `webhooks/0002_event` cria sua tabela.
+Se o banco já foi preparado pelo Docker, reaproveite as migrations e o usuário existentes. O Django lê as variáveis do ambiente; não carrega `.env` automaticamente. Carregue apenas seu próprio arquivo.
 
-| Campo | Finalidade |
-| --- | --- |
-| `id` | UUID do aviso, gerado pela aplicação. |
-| `endpoint` | Referência ao destino cadastrado, protegida contra exclusão enquanto houver eventos vinculados. |
-| `event_type` | Tipo do aviso, que deve corresponder ao tipo cadastrado no destino. |
-| `payload` | Dados do aviso em um objeto JSON. |
-| `status` | Estado controlado pela aplicação, inicialmente `pending`, sem edição em formulários. |
-| `created_at` | Data e hora do registro, preenchidas automaticamente. |
+</details>
 
-`Event.full_clean()` valida os dados e verifica novamente se a URL do destino continua autorizada. Não realiza HTTP nem DNS. `payload` aceita objetos, inclusive `{}`, com valores JSON válidos; seu tamanho máximo é 16 KiB (16.384 bytes), medido em JSON compacto codificado em UTF-8. Rejeita números não finitos, chaves que não sejam textos, Unicode inválido e o caractere nulo U+0000, incompatível com o armazenamento JSONB do PostgreSQL.
+## Usar a API
 
-O banco exige um destino existente e um dos estados abaixo. A migration `webhooks/0004_event_delivery_states` amplia os valores permitidos e as categorias da tentativa; deve ser aplicada em cada banco antes de usar a coordenação de entrega.
+As operações de webhooks exigem sessão Django, usuário ativo da equipe e a permissão indicada. POST autenticado exige CSRF. Use a interface DRF no navegador após entrar no admin ou o Bruno API Client com cookies de sessão e CSRF; envie os corpos como JSON.
 
-| Estado | Significado |
-| --- | --- |
-| `pending` | Evento registrado, sem envio iniciado pelo serviço. |
-| `sending` | Início da tentativa registrado, sem resultado final persistido. |
-| `delivered` | Tentativa concluída com resposta HTTP 200–299. |
-| `failed` | Tentativa concluída sem resposta HTTP de sucesso. |
+| Método | Rota | Resultado | Permissão |
+| --- | --- | --- | --- |
+| GET | `/api/saude/` | `200`, `{"status": "ok"}` | Pública |
+| POST | `/api/eventos/` | `201`, evento `pending` | `webhooks.add_event` |
+| GET | `/api/eventos/<uuid>/` | `200`, evento | `webhooks.view_event` |
+| POST | `/api/eventos/<uuid>/enviar/` | `200`, resultado persistido | `webhooks.send_event` |
+| GET | `/api/eventos/<uuid>/tentativa/` | `200`, tentativa | `webhooks.view_deliveryattempt` |
 
-`delivered` não comprova o processamento interno do receptor; `failed` por timeout não comprova ausência de recebimento. A restrição de estados não controla, sozinha, sua ordem ou a relação com a tentativa; essa coordenação está em `services.py`. Registrar dois avisos iguais gera eventos com IDs diferentes: não existe deduplicação por conteúdo ou chave de idempotência.
+As permissões são por modelo: um operador autorizado pode consultar registros de outros operadores. Não há listagem, edição ou exclusão de eventos pela API.
 
-Em escritas diretas pelo ORM, chame `full_clean()` antes de `save()`; salvar não executa essa validação automaticamente. O serializer da API executa `full_clean()` antes de permitir a criação e devolve erros de validação associados aos campos da requisição. Não há formulário de eventos no admin. Salvar um evento não dispara envio. Cada banco precisa receber sua migration antes de usar essa tabela.
-
-## Modelo de tentativas de entrega
-
-`DeliveryAttempt` armazena os dados de uma tentativa para um único evento. A migration `webhooks/0003_delivery_attempt` cria a tabela; deve ser aplicada em cada banco onde o modelo será usado.
-
-| Campo | Finalidade |
-| --- | --- |
-| `id` | UUID da tentativa, gerado pela aplicação. |
-| `event` | Vínculo único com o evento, protegido contra exclusão pelo ORM enquanto houver tentativa. |
-| `started_at` | Início, preenchido por padrão com o horário atual. |
-| `finished_at` | Término; vazio enquanto não houver resultado registrado. |
-| `http_status` | Resposta HTTP final entre 200 e 599, quando recebida. |
-| `error_code` | Vazio ou uma categoria: `http_error`, `network_error`, `timeout` ou `destination_rejected`. |
-
-O PostgreSQL permite no máximo uma tentativa por evento neste MVP. A relação `OneToOneField` impede um segundo registro; o início único da chamada é coordenado pelo serviço descrito abaixo. Retry exigirá rever esse limite e o fluxo de envio.
-
-As restrições do modelo e do banco permitem somente estas combinações:
-
-- Em andamento: sem término, sem código HTTP e sem categoria de falha.
-- Resposta HTTP 200–299: com término e sem categoria de falha.
-- Resposta HTTP 300–599: com término e categoria `http_error`.
-- Falha sem resposta HTTP: com término, sem código HTTP e categoria `network_error`, `timeout` ou `destination_rejected`.
-
-O término não pode ser anterior ao início. Por exemplo, uma resposta 500 exige `http_error`; um timeout não recebe um código HTTP inventado. Timeout ou falha de comunicação não comprovam que o destinatário deixou de receber o evento. Uma resposta 2xx também não comprova que o destinatário concluiu seu processamento interno.
-
-`full_clean()` verifica as regras antes de salvar, e as restrições do PostgreSQL também protegem escritas que pulem essa validação. Não há armazenamento de corpo/headers da resposta nem de texto livre de exceções. O modelo gera somente a permissão de consulta; não está registrado no admin e não possui rota ou serializer próprios.
-
-Cadastrar um evento não cria uma tentativa. O modelo armazena os dados; `deliver_event()` coordena o envio e as alterações de estado. Um registro sem término representa resultado ainda não registrado, inclusive se a execução for interrompida; não autoriza recuperação ou novo envio automático.
-
-## Coordenação interna da entrega
-
-`webhooks/services.py` contém `deliver_event(event_id)`, uma função síncrona que retorna a tentativa concluída quando consegue persistir o resultado. Não está ligada a uma view, rota ou ação do admin. A API de cadastro continua salvando somente um evento `pending`; o envio precisa ser solicitado separadamente por uma futura rota com controles próprios.
-
-O fluxo tem duas transações curtas, com o POST HTTPS entre elas:
-
-1. Revalidar os dados do evento e a autorização da URL, exigir `pending` e ausência de tentativa, atualizar condicionalmente para `sending` e criar a tentativa sem resultado. Estado e tentativa são confirmados juntos antes da rede.
-2. Montar o envelope e chamar `post_json()` fora da transação. O transporte revalida o destino e aplica a política de DNS/IP/TLS.
-3. Validar e salvar término, código HTTP e categoria de falha, atualizando o evento na mesma transação final: `delivered` para HTTP 200–299; `failed` para HTTP 300–599, falha de comunicação, timeout ou rejeição do destino.
-
-O envelope enviado tem este formato, com valores ilustrativos:
+1. **Cadastre o destino:** inclua sua URL HTTPS exata em `WEBHOOK_ALLOWED_URLS` e cadastre URL e tipo em **Admin → Webhooks → Destinos de webhook**. O par URL/tipo é único. O admin permite cadastro e consulta, sem edição ou exclusão; usuários da equipe precisam das permissões `add_webhookendpoint` e `view_webhookendpoint`.
+2. **Registre o evento:** substitua `endpoint_id` pelo UUID do destino cadastrado e envie este JSON ao POST de eventos:
 
 ```json
 {
-  "id": "22222222-2222-4222-8222-222222222222",
+  "endpoint_id": "11111111-1111-4111-8111-111111111111",
   "event_type": "pedido.pago",
-  "created_at": "2026-10-28T12:00:00+00:00",
   "payload": {"pedido_id": 123}
 }
 ```
 
-`id` identifica o evento, e `created_at` usa ISO 8601. O payload continua limitado a 16 KiB; o envelope completo cabe nos 17 KiB aceitos pelo transporte.
+3. **Solicite o envio:** use o UUID do evento no POST `/enviar/`, com corpo vazio ou `{}`. O envio usa os dados já registrados; campos adicionais são rejeitados.
+4. **Consulte a tentativa:** use o mesmo UUID no GET `/tentativa/`. Sem tentativa registrada, a resposta é `404`.
 
-O início usa uma atualização condicional no PostgreSQL: somente um concorrente consegue mudar o mesmo evento de `pending` para `sending`. Os demais recebem `DeliveryAlreadyStarted`, assim como solicitações repetidas após conclusão ou interrupção. As transações usam `atomic(durable=True)` para exigir confirmação própria; o serviço não deve ser chamado dentro de outra transação comum. Não há fila, retry ou reenvio automático.
+Cadastrar um destino ou evento não dispara envio. A solicitação de envio aguarda a chamada externa e a gravação do resultado.
 
-Dados inválidos ou URL desautorizada detectados antes do início deixam o evento `pending`, sem tentativa. Uma rejeição da URL/IP pelo transporte após o início é registrada como `destination_rejected`, sem código HTTP. Erros internos de construção/tamanho do envelope propagam sem serem classificados como rejeição de destino.
-
-Se houver interrupção, falha inesperada ou erro ao persistir o resultado final, o início já confirmado permanece: evento `sending` e tentativa sem término, com recebimento possivelmente incerto. Uma nova chamada é recusada; não há recuperação automática. Retirar a URL da autorização depois de uma resposta não apaga o resultado observado. Não executar esse serviço contra o domínio fictício dos exemplos; a prática de envio depende de receptor real controlado.
-
-## Transporte HTTPS interno
-
-`webhooks/delivery.py` contém `post_json(url, data)`, que recebe uma URL e um objeto JSON, faz um único POST HTTPS e devolve `DeliveryResult(http_status, error_code)`. O transporte não consulta ou grava eventos/tentativas e não está ligado às views. Registrar um evento continua criando somente `Event` com estado `pending`.
-
-O chamador deve validar os dados de negócio e montar o objeto enviado; `deliver_event()` usa o envelope descrito acima. O transporte codifica esse objeto em JSON compacto UTF-8 e limita o corpo completo a 17 KiB, reservando espaço para metadados além dos 16 KiB de payload permitidos na API. JSON inválido ou corpo maior que esse limite gera `ValidationError` antes do DNS.
-
-O fluxo interno é: revalidar URL autorizada → resolver domínio → conferir IPs → conectar ao IP aprovado → negociar TLS para o domínio original → POST → ler o resultado.
-
-- `resolve_destination()` reaproveita a validação da URL e verifica todos os IPs retornados pelo resolvedor. Qualquer IP proibido bloqueia o destino inteiro, inclusive em respostas que misturem IP público e privado. IP literal público autorizado dispensa DNS.
-- A política exige IP global, sem multicast/reservados. IPv6 fica restrito a endereços nativos públicos em `2000::/3`, sem identificador de interface, IPv4 mapeado ou mecanismos de transição. Domínios incompatíveis com a conversão IDNA são rejeitados.
-- A conexão usa diretamente um IP aprovado, preferindo IPv4 quando disponível; não consulta o domínio novamente nem tenta outro IP automaticamente. O domínio original continua sendo usado na verificação do certificado TLS.
-- Método e headers são definidos pela aplicação. O cliente não usa proxy do ambiente, não encaminha cookies/credenciais recebidos e não segue redirecionamentos. Não há retry.
-
-| Resultado | `http_status` | `error_code` |
-| --- | --- | --- |
-| Resposta HTTP de sucesso | 200–299 | Texto vazio |
-| Resposta HTTP sem sucesso, incluindo redirecionamento | 300–599 | `http_error` |
-| Prazo excedido na conexão, escrita ou leitura | `None` | `timeout` |
-| Falha de DNS, rede, TLS ou protocolo HTTP | `None` | `network_error` |
-
-URL desautorizada, IP proibido ou domínio inválido gera `ValidationError` para o chamador. Essas rejeições não são respostas HTTP do destinatário. O resultado contém somente código HTTP e categoria; corpo, headers e detalhes brutos de exceções não são retornados ou persistidos. Uma resposta 2xx não comprova o processamento interno do receptor; timeout não comprova que ele deixou de receber o aviso.
-
-| Limite | Comportamento |
+| Estado | Significado |
 | --- | --- |
-| TCP e negociação TLS | Compartilham um prazo de 3 segundos. |
-| Escrita | Timeout de 5 segundos por operação. |
-| Leitura da resposta | Prazo de 5 segundos para a fase e cota de 16 KiB, mesmo com chegada contínua de bytes. |
-| DNS | Usa o resolvedor do sistema, sem prazo total próprio na aplicação. |
+| `pending` | Evento registrado, sem envio iniciado pelo serviço. |
+| `sending` | Início registrado, sem resultado final persistido. |
+| `delivered` | Receptor respondeu HTTP 200–299. |
+| `failed` | Tentativa terminou sem resposta HTTP de sucesso. |
 
-O parser HTTP é o da biblioteca padrão Python. Um leitor limitado controla tempo e bytes; o corpo da resposta não é consumido integralmente. O buffer pode antecipar alguns bytes do corpo, sempre dentro da cota. Não há limite global que inclua DNS e todas as fases do envio. [Cliente HTTP do Python](https://docs.python.org/3.14/library/http.client.html).
+A tentativa apresenta `id`, `event_id`, `event_status`, `started_at`, `finished_at`, `http_status` e `error_code`. As categorias de falha são `http_error`, `network_error`, `timeout` e `destination_rejected`; sucesso usa texto vazio.
 
-O comportamento foi verificado com rede/DNS/TLS simulados e parser HTTP real. A entrega a um receptor real controlado ainda não foi verificada. Antes de expor envio, faltam a rota, sua política de acesso, limites de uso, orçamento global e retenção; as funções internas, sozinhas, não são uma demonstração pública de webhooks.
+**HTTP 200 da nossa API significa resultado registrado:** pode conter `http_status: 500` e estado `failed`, pois esse código veio do receptor. Uma resposta 2xx do receptor não comprova seu processamento interno. Timeout ou interrupção não comprovam ausência de recebimento.
 
-## Registro e consulta de eventos
-
-Estas rotas são internas ao operador. Exigem usuário ativo da equipe (`is_staff`), uma sessão Django autenticada e a permissão correspondente. Não há cadastro público de usuários nem acesso anônimo aos eventos. A saúde permanece pública.
-
-| Método e caminho | Permissão | Resultado |
-| --- | --- | --- |
-| `POST /api/eventos/` | `webhooks.add_event` | Registra um aviso e retorna `201`. |
-| `GET /api/eventos/<uuid>/` | `webhooks.view_event` | Consulta um aviso e retorna `200`, ou `404` se o ID válido não existir. |
-
-O acesso usa `SessionAuthentication`, com proteção CSRF no POST. `EventModelPermissions` exige explicitamente a permissão de consulta para GET, HEAD e OPTIONS; o padrão de `DjangoModelPermissions` não exige `view` no GET. As permissões são por modelo: um operador autorizado a consultar pode acessar os eventos do serviço; não existe separação por proprietário ou produto multiusuário. [Autenticação por sessão no DRF](https://www.django-rest-framework.org/api-guide/authentication/#sessionauthentication).
-
-### Registrar um aviso
-
-Envie JSON com exatamente `endpoint_id`, `event_type` e `payload`. Substitua o UUID ilustrativo pelo ID de um destino cadastrado e ainda autorizado:
-
-```json
-{
-  "endpoint_id": "11111111-1111-4111-8111-111111111111",
-  "event_type": "pedido.pago",
-  "payload": {
-    "pedido_id": 123
-  }
-}
-```
-
-O tipo deve corresponder ao destino e o payload deve respeitar as regras do modelo. Campos desconhecidos ou controlados pela aplicação, como `id`, `status` e `created_at`, são rejeitados com `400`. O limite de 16 KiB é do payload em JSON compacto UTF-8, não do corpo HTTP completo.
-
-A resposta `201` contém `id`, `endpoint_id`, `event_type`, `payload`, `status` e `created_at`. Exemplo ilustrativo:
-
-```json
-{
-  "id": "22222222-2222-4222-8222-222222222222",
-  "endpoint_id": "11111111-1111-4111-8111-111111111111",
-  "event_type": "pedido.pago",
-  "payload": {"pedido_id": 123},
-  "status": "pending",
-  "created_at": "2026-10-25T12:00:00Z"
-}
-```
-
-### Consultar e tratar erros
-
-Use `GET /api/eventos/<id-retornado>/` com a mesma sessão e permissão de consulta. A resposta apresenta os mesmos campos. Remover a URL da lista permitida impede novos cadastros para ela, mas mantém a consulta aos eventos existentes.
-
-Não há listagem em `GET /api/eventos/`, nem edição, exclusão ou rota de envio. Métodos sem atendimento retornam `405` depois das verificações de acesso; uma operação sem permissão pode ser rejeitada antes com `403`. Um UUID malformado no caminho é rejeitado pelo roteamento Django com `404`, cuja resposta pode ser HTML.
-
-| Status | Significado nesta API |
+| Erro da API | Situação |
 | --- | --- |
-| `400` | Campos ausentes, destino inválido/desautorizado, tipo incompatível, payload inválido/grande ou JSON incorreto. |
-| `403` | Sessão ausente/inválida, usuário sem acesso ou falha de CSRF. Autenticação por sessão usa `403` nesses casos. |
-| `404` | Evento não encontrado ou UUID inválido no caminho. |
-| `405` | Método sem atendimento, após autorização. |
-| `415` | Corpo enviado com Content-Type diferente de `application/json`. |
+| `400` / `415` | Dados inválidos ou formato de corpo não suportado. |
+| `403` | Falta de acesso ou CSRF. |
+| `404` | Evento ou tentativa não encontrado. |
+| `409` | Envio já iniciado; não há reenvio automático. |
+| `429` | Cota atingida, com `Retry-After` em segundos. |
+| `503` | Envio desabilitado ou reserva temporariamente ocupada. |
+| `500` | Falha interna; consulte a tentativa antes de outra ação. |
 
-### Explorar localmente
+## Segurança e limites
 
-Prepare o `.env`, a URL autorizada, os serviços, as migrations e seu acesso local conforme as seções anteriores. Faça login em `http://127.0.0.1:8000/admin/`. Um superusuário local possui as permissões necessárias; para outro operador ativo da equipe, atribua `add_event` e `view_event` pelo admin.
+- **Destinos controlados:** `WEBHOOK_ALLOWED_URLS` contém URLs HTTPS completas e exatas, separadas por vírgulas. Vazia bloqueia cadastro e envio. Só use receptores que controla ou tem autorização para usar.
+- **Proteção de saída:** revalidação de URL e DNS/IP, conexão ao IP validado e certificado TLS para o domínio original. IPs internos são bloqueados; sem redirecionamentos, proxy do ambiente ou encaminhamento de credenciais recebidas.
+- **Dados:** payload como objeto JSON de até 16 KiB; envelope enviado de até 17 KiB. Corpo e headers da resposta externa não são persistidos.
+- **Tempo:** TCP/TLS compartilham 3 s; escrita tem 5 s por operação; leitura tem prazo de 5 s e cota de 16 KiB. DNS não possui prazo total próprio na aplicação.
+- **Orçamento:** `WEBHOOK_MAX_DELIVERIES_PER_MINUTE=3` por operador; `WEBHOOK_MAX_DELIVERIES_PER_DAY=0` por padrão. Qualquer limite zero desabilita envio. Para habilitar, configure orçamento positivo após preparar o receptor; por exemplo, `20` inícios nas últimas 24 horas.
+- **Concorrência:** o PostgreSQL coordena início único e reserva de orçamento. Tentativas iniciadas consomem cota mesmo quando falham; a chamada externa ocorre sem transação aberta.
 
-No mesmo navegador e usando o mesmo host, abra `http://127.0.0.1:8000/api/eventos/`. O GET retorna `405`, pois não existe listagem, mas a interface navegável do DRF permite enviar o JSON pelo formulário de conteúdo e botão POST. Use o ID retornado para abrir `/api/eventos/<id>/` e consultar o aviso. Cookies de login em `127.0.0.1` não autenticam automaticamente `localhost`.
+`DJANGO_ALLOWED_HOSTS` configura os domínios da nossa API; `WEBHOOK_ALLOWED_URLS` controla os receptores. Uma interrupção pode deixar `sending` e tentativa incompleta, que exige avaliação manual e não permite reenvio automático. Os limites de envio não substituem proteção contra DDoS.
 
-No Bruno API Client, envie `Content-Type: application/json` e `Accept: application/json`. Para autenticar, o cliente precisa dos cookies `sessionid` e `csrftoken` de um login Django válido no mesmo ambiente; no POST, envie também `X-CSRFToken` com o token correspondente ao cookie. Sem sessão/permissão ou sem CSRF válido, espere `403` e nenhum evento novo. Não compartilhe nem versione esses valores. Autenticação Basic ou token não foi habilitada nessas rotas.
+## Testes
 
-Os testes automatizados verificam cadastro `201`, consulta `200`, efeitos no banco e rejeições. Login, sessão, CSRF e atributos Secure também são exercitados em um teste com HTTPS simulado no cliente Django; isso não comprova uma conta ou cookies autenticados na Vercel. Testes manuais autenticados no navegador/Bruno devem ser verificados no ambiente usado. Antes de publicar, aplique `0002_event` no Neon e confira o ambiente hospedado; deploy e saúde não substituem essa preparação.
-
-## Imagem Docker para desenvolvimento
-
-O `Dockerfile` descreve uma imagem local com Python 3.14, código da aplicação e dependências de `requirements-dev.txt`, incluindo as ferramentas de testes. A base é a imagem oficial `python:3.14-slim-bookworm`, com Debian e Python; `slim` indica uma variante menor, com menos pacotes do sistema. Não é necessário copiar a `.venv` da máquina.
-
-Na raiz do repositório, com Docker disponível, construa a imagem:
-
-```bash
-docker build -t webhook-delivery-api:dev .
-```
-
-`-t` dá nome e etiqueta à imagem; `.` indica a pasta atual como origem dos arquivos da construção. O Docker lê o `Dockerfile` e aplica o `.dockerignore` antes de enviar esses arquivos à construção. A primeira execução precisa baixar a imagem base e as dependências.
-
-O `.dockerignore` exclui `.env`, `.env.neon`, `.venv/`, `docs/`, histórico Git e arquivos gerados. `.env.example` continua permitido por conter somente exemplos públicos. Configurações e credenciais reais deverão ser fornecidas ao executar o container, sem serem gravadas na imagem. O `.gitignore` e o `.dockerignore` controlam ferramentas diferentes; ignorar um arquivo no Git não o exclui automaticamente da construção Docker.
-
-Para conferir o Python e as dependências instaladas, execute containers temporários:
+Com os serviços locais iniciados:
 
 ```bash
-docker run --rm webhook-delivery-api:dev python --version
-docker run --rm webhook-delivery-api:dev python -m pip check
-```
-
-Esses comandos substituem o comando padrão da imagem e não carregam as configurações do Django nem consultam o banco. `--rm` remove o container ao terminar, preservando a imagem. Construção e verificações devem ser executadas no ambiente local; a presença dos arquivos no repositório não comprova sua execução.
-
-O comando padrão da imagem é o servidor de desenvolvimento Django, executado pelo usuário `app` sem privilégios de administrador. A pasta de trabalho `/app` também pertence a esse usuário, permitindo criar o cache do pytest durante os testes. Ele escuta em `0.0.0.0:8000` dentro do container; isso não publica uma porta na máquina por si só. Não é um servidor para produção. Construir a imagem não inicia a API. A publicação permanece no suporte Django da Vercel com PostgreSQL no Neon.
-
-## API e PostgreSQL pelo Docker Compose
-
-O `compose.yaml` define dois serviços locais: `api`, construído pelo `Dockerfile`, e `db`, com PostgreSQL 17. Antes de iniciar, prepare o `.env` local conforme a seção abaixo, com credenciais próprias, `DJANGO_DEBUG=True`, hosts `127.0.0.1,localhost` e `DJANGO_SECURE_COOKIES=False` para HTTP local.
-
-O Compose fornece as variáveis do `.env` ao container da API por `env_file`. O arquivo não é copiado para a imagem; os valores são fornecidos na execução. Dentro da API, o Compose substitui `POSTGRES_HOST` por `db`, `POSTGRES_PORT` por `5432` e `POSTGRES_SSLMODE` por `disable`, pois esse banco local não configura TLS. A `.env.neon` não participa dessa execução. Para esse fluxo não é necessário ativar a `.venv` nem executar `source .env`; use as configurações locais, sem exportações do Neon no terminal.
-
-Os containers usam a rede criada pelo Compose. O Django encontra o PostgreSQL pelo nome do serviço, `db`; `127.0.0.1` dentro do container da API apontaria para a própria API. A porta interna do banco continua `5432`, mesmo que sua porta publicada na máquina seja outra. `depends_on` com `service_healthy` aguarda o healthcheck do PostgreSQL antes de iniciar a API; não executa migrations nem garante disponibilidade contínua.
-
-Na raiz do projeto, valide a configuração sem exibir seus valores e inicie os serviços:
-
-```bash
-docker compose config -q
-docker compose up -d --build --wait --wait-timeout 60
-docker compose ps
-```
-
-Se estiver usando o servidor Django na `.venv`, encerre-o antes com `Ctrl+C` para liberar a porta `8000`. A API é publicada somente em `127.0.0.1:8000`. Acesse `http://127.0.0.1:8000/api/saude/` no navegador ou no Bruno API Client com `GET`, sem autenticação ou corpo; espere `200` e `{"status": "ok"}`. O banco usa o volume `postgres_data` já definido; os comandos acima não o apagam. A opção `--wait` verifica o healthcheck do banco e a execução do container da API, que ainda não possui healthcheck próprio; confirme a resposta HTTP separadamente.
-
-Consulte os logs e execute os comandos Django dentro do serviço `api`:
-
-```bash
-docker compose logs --tail=50 api
 docker compose exec api python manage.py check
-docker compose exec api python manage.py showmigrations
-docker compose exec api python manage.py migrate
 docker compose exec api python -m pytest -q
 ```
 
-`exec api` executa um comando no container da API que já está em execução. `migrate` aplica somente migrations pendentes no PostgreSQL local; não migra o Neon. Os testes atuais de saúde continuam sem acessar o banco. Para parar os serviços e remover os containers preservando os dados, use `docker compose down`.
+A suíte cobre validações, permissões, CSRF, persistência, falhas, concorrência, cotas e retenção. Usa PostgreSQL local em banco separado e transporte/DNS/TLS simulados; não comprova entrega real. Não execute os testes com a configuração do Neon.
 
-O código desta etapa fica copiado na imagem, sem montagem da pasta do projeto. Depois de alterar código, testes, dependências ou Dockerfile, repita `docker compose up -d --build --wait --wait-timeout 60`. Depois de mudar somente o `.env`, use `docker compose up -d --wait --wait-timeout 60` para o Compose atualizar o container. Arquivos privados do projeto não são montados dentro da API.
+## Retenção de dados
 
-## Preparação local da base e alternativa com .venv
-
-A base foi gerada com Python 3.14 e Django 5.2.18. O banco local usa a imagem oficial PostgreSQL 17. Tenha Docker com Compose disponível e execute os comandos na raiz do repositório.
-
-`.python-version`, na raiz, declara Python 3.14 para a Vercel usar essa mesma versão principal e secundária na publicação. O arquivo não instala Python nem modifica uma `.venv` existente; confira a versão local com `python --version` após ativar o ambiente. [Configuração oficial da versão Python na Vercel](https://vercel.com/docs/functions/runtimes/python/python-version).
-
-Crie e ative o ambiente virtual, depois instale as dependências de desenvolvimento:
+A limpeza é manual. Este comando apenas mostra os registros elegíveis:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements-dev.txt
+docker compose exec api python manage.py purge_webhook_data
 ```
 
-`requirements.txt` declara Django, DRF e psycopg. `requirements-dev.txt` inclui esse arquivo e acrescenta pytest e pytest-django. Para executar a aplicação sem ferramentas de testes, instale somente `requirements.txt`.
+A opção `--apply` exclui eventos pendentes sem tentativa e entregas concluídas com mais de sete dias, considerando as datas do evento e da tentativa. Incompletos, dados recentes, destinos e usuários são preservados. Cada lote de até 100 eventos é confirmado separadamente; uma falha desfaz somente o lote atual. Registros ocupados ficam para outra execução. Não há agendamento automático.
 
-O arquivo `.env.example` mostra as variáveis de configuração, sem segredos reais. Para criar um `.env` local com uma chave aleatória, execute uma única vez, quando o arquivo ainda não existir:
+## Publicação
 
-```bash
-python -c "from django.core.management.utils import get_random_secret_key; print('DJANGO_SECRET_KEY=' + repr(get_random_secret_key()))" > .env
-```
+Vercel Hobby executa o Django; Neon Free fornece o PostgreSQL. [vercel.json](vercel.json) permite deploy automático somente da `main`, sem Preview automático.
 
-O comando grava a chave no `.env`, que fica fora do Git. Não compartilhe esse arquivo. A chave usada na hospedagem será gerada separadamente.
+Configure em Production: chave Django própria, `DJANGO_DEBUG=False`, domínio específico em `DJANGO_ALLOWED_HOSTS`, `DJANGO_SECURE_COOKIES=True` e `POSTGRES_*` do Neon com `POSTGRES_SSLMODE=require`. O `disable` de [.env.example](.env.example) é exclusivo do PostgreSQL local sem TLS.
 
-Acrescente também estas opções ao `.env`, preservando as linhas existentes:
+**Aplique as migrations no Neon antes de publicar o código correspondente.** Migrar localmente ou fazer merge não atualiza o banco hospedado. Para operações pelo terminal, mantenha as opções do Neon em `.env.neon`, separadas do `.env` local. Credenciais, arquivos `.env` locais e `.venv/` ficam fora do Git; `.env.example` é o modelo público.
 
-```ini
-DJANGO_DEBUG=True
-DJANGO_ALLOWED_HOSTS=127.0.0.1,localhost
-DJANGO_SECURE_COOKIES=False
-```
+## Fora do MVP
 
-`DJANGO_DEBUG` ativa o modo de desenvolvimento somente com o texto exato `True`; sem a variável, o modo fica desativado. Na hospedagem, use `False`, pois páginas detalhadas de erro podem expor informações internas. `DJANGO_ALLOWED_HOSTS` contém os nomes de domínio ou IPs pelos quais esta aplicação aceita requisições, separados por vírgulas e sem protocolo, porta ou caminho. Sem a variável, a lista fica vazia. Na hospedagem, configure os domínios específicos da aplicação; não use `*`. Essa lista não autoriza destinos de webhooks.
-
-`DJANGO_SECURE_COOKIES` controla `SESSION_COOKIE_SECURE` e `CSRF_COOKIE_SECURE`. Por padrão, ambos ficam ativados: os cookies recebem o atributo `Secure`, restringindo seu envio a HTTPS. Somente o texto exato `False` desativa essa opção, como no desenvolvimento local por HTTP. Na hospedagem HTTPS, mantenha `True` ou omita a variável. A escolha é independente de `DEBUG`; não copie a opção local `False` para a Vercel.
-
-Acrescente ao `.env` as variáveis de PostgreSQL indicadas em `.env.example`, preservando sua chave Django. Substitua a senha de exemplo por uma senha local própria antes de iniciar o banco. `POSTGRES_HOST=127.0.0.1` é o endereço usado pelo Django que roda na máquina; `db` é o nome do serviço dentro do Compose.
-
-Inclua `POSTGRES_SSLMODE=disable` para conectar ao PostgreSQL local deste Compose, que não tem SSL/TLS configurado. A opção controla a conexão Django–PostgreSQL. Sem a variável, a aplicação usa `require`, que exige uma conexão criptografada; use esse valor para o Neon, cuja conexão usa TLS. SSL é o antecessor do TLS; o nome `sslmode` foi mantido na configuração do PostgreSQL. Não use `disable` para o banco hospedado. Essa opção não configura o HTTPS da API nem das entregas de webhooks.
-
-Para gerar essa senha local:
-
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
-Copie o resultado para `POSTGRES_PASSWORD` no seu `.env`, mantendo as aspas simples. Gere e configure a senha antes da primeira inicialização do banco.
-
-Em cada terminal novo, ative a `.venv` e carregue as variáveis locais:
-
-```bash
-source .venv/bin/activate
-set -a
-source .env
-set +a
-```
-
-Carregue somente seu próprio `.env`: `source` interpreta seu conteúdo como comandos do shell. O Django lê `DJANGO_SECRET_KEY` do ambiente; ele não carrega o arquivo automaticamente. Sem essa variável, a inicialização falha com `KeyError: 'DJANGO_SECRET_KEY'`.
-
-O Compose também lê o `.env` da raiz para preencher sua configuração. Para executar Django na `.venv` como alternativa ao container, inicie somente o banco e aguarde a verificação de disponibilidade:
-
-```bash
-docker compose up -d --wait --wait-timeout 60 db
-docker compose ps
-```
-
-A porta do banco é publicada apenas em `127.0.0.1`. Se a porta 5432 estiver ocupada por outro projeto, escolha outra em `POSTGRES_PORT` no `.env`, recarregue o ambiente e repita a inicialização. A porta dentro do container permanece 5432.
-
-Verifique o Django e aplique as migrations padrão:
-
-```bash
-python manage.py check
-python manage.py migrate
-python manage.py showmigrations
-```
-
-`check` verifica a configuração; `migrate` conecta ao PostgreSQL e aplica as migrations, incluindo as tabelas de destinos, eventos e tentativas de entrega; `showmigrations` lista quais migrations estão aplicadas, com `[X]`.
-
-Os dados ficam no volume `postgres_data`, gerenciado pelo Docker e separado dos arquivos versionados. Para parar e remover os containers preservando o volume:
-
-```bash
-docker compose down
-```
-
-As credenciais e o banco definidos na imagem oficial são criados na primeira inicialização de um volume vazio. Alterar a senha no `.env` depois não altera a senha de um banco existente. A conta inicial tem privilégios de administrador para este ambiente local; a hospedagem terá configuração própria.
-
-## Preparação do banco hospedado no Neon
-
-Crie um projeto no Neon Free com PostgreSQL 17. A preparação foi feita na região AWS US East (N. Virginia). No painel, abra **Connect**, selecione o banco e o **Role** (usuário do PostgreSQL) da branch desejada e desative **Connection pooling** para obter a conexão direta usada nesta etapa. [Instruções oficiais de conexão](https://neon.com/docs/connect/connect-from-any-app).
-
-Mantenha o `.env` local e crie um arquivo separado `.env.neon`, contendo somente as opções do banco hospedado:
-
-```ini
-POSTGRES_DB='nome-do-seu-banco'
-POSTGRES_USER='usuario-do-seu-banco'
-POSTGRES_PASSWORD='senha-do-seu-banco'
-POSTGRES_HOST='host-direto-do-seu-banco'
-POSTGRES_PORT=5432
-POSTGRES_SSLMODE=require
-```
-
-Substitua os exemplos pelos valores exatos do painel. Hífen e sublinhado não são equivalentes no nome do usuário. O host deve ficar em uma linha, sem protocolo, porta, caminho ou parâmetros da URL. A senha é a do usuário do banco, não a da conta no site Neon. `.env.neon` é ignorado pelo Git e não deve ser compartilhado.
-
-Na raiz do projeto, com a `.venv` ativa e o `.env` local já preparado, consulte o banco, aplique as migrations e confira o resultado:
-
-```bash
-(
-    set -e
-    set -a
-    source .env
-    source .env.neon
-    set +a
-    POSTGRES_SSLMODE=require python manage.py showmigrations
-    POSTGRES_SSLMODE=require python manage.py migrate
-    POSTGRES_SSLMODE=require python manage.py showmigrations
-)
-```
-
-O `.env` fornece a chave e as opções do Django; `.env.neon` sobrescreve as opções do banco nesse bloco. Os parênteses criam um subshell: ao terminar, essas substituições não permanecem no terminal principal. `set -e` interrompe o bloco se houver falha. Carregue somente arquivos que você próprio preparou, pois `source` interpreta seu conteúdo como comandos do shell.
-
-Em um banco novo, as migrations aparecem com `[ ]` antes da aplicação e `[X]` depois. Cada banco mantém seu próprio registro; migrar localmente não migra o Neon. Os mesmos arquivos de migration são aplicados em cada ambiente, e `migrate` executa apenas os pendentes. A aplicação de migrations no Neon é manual nesta etapa; ainda não há automação de CI/CD.
-
-Use `.env` para desenvolvimento, Compose e testes locais. A publicação na Vercel usa uma chave Django própria, diferente da local. O sucesso dessa preparação verifica a conexão do terminal ao banco hospedado e suas migrations; não verifica a conexão da execução na Vercel ao Neon.
-
-## Execução local e rota de saúde
-
-Com a `.venv` ativa, as variáveis do `.env` carregadas e o PostgreSQL iniciado, execute:
-
-```bash
-python manage.py check
-python manage.py runserver 127.0.0.1:8000
-```
-
-No Bruno API Client, ferramenta para testar APIs, faça esta requisição:
-
-- Método: `GET`.
-- URL: `http://127.0.0.1:8000/api/saude/`.
-- Autenticação: nenhuma.
-- Header: `Accept: application/json`.
-- Corpo: nenhum.
-- Resposta: HTTP `200` com `{"status": "ok"}`.
-
-Essa rota confirma que a aplicação atende à requisição. Não consulta o banco, não grava dados e não faz chamadas externas; não verifica a disponibilidade do PostgreSQL nem a capacidade de entregar webhooks. A view de saúde é deliberadamente pública e desabilita a autenticação. Isso não define a política de acesso dos futuros endpoints de webhooks, que ainda será implementada. Um `POST` para a mesma URL retorna HTTP `405`, com a explicação no campo `detail`.
-
-O servidor desse comando é destinado ao desenvolvimento local. Encerre com `Ctrl+C`.
-
-## HTTPS e cookies na publicação
-
-A Vercel fornece o redirecionamento HTTP para HTTPS e o HSTS do domínio `.vercel.app`. Foram observados o status `308` com `Location` apontando à mesma rota de saúde em HTTPS e o header `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`. Esses controles ficam na hospedagem; não são ativados novamente no Django nesta configuração. [Documentação da Vercel](https://vercel.com/docs/cdn-security/encryption).
-
-O Django configura os atributos dos cookies de sessão e CSRF conforme `DJANGO_SECURE_COOKIES`. A configuração foi publicada na PR #3 e o atributo `Secure` do cookie CSRF foi observado na resposta do login do admin. O cookie de sessão será verificado em acesso autenticado; ainda não foi observado. A configuração não cria um login próprio da API nem muda o acesso público à saúde.
-
-O comando `python manage.py check --deploy` verifica configurações locais do Django. Os avisos `security.W004` e `security.W008` podem continuar porque ele não inspeciona o HSTS e o redirecionamento fornecidos pela Vercel. Nesta hospedagem, esses comportamentos devem ser verificados nas respostas públicas. Ao trocar de hospedagem, reavalie onde esses controles serão aplicados. Não há avisos silenciados nesta configuração.
-
-## Arquivos estáticos
-
-`STATIC_URL = '/static/'` define o caminho de acesso aos arquivos estáticos, como CSS, JavaScript e imagens. `STATIC_ROOT` aponta para `staticfiles/`, na raiz, onde o comando oficial `collectstatic` reúne cópias dos arquivos das aplicações instaladas, incluindo Django admin e DRF. Essa pasta é gerada e ignorada pelo Git; os arquivos de origem permanecem nas aplicações.
-
-Na raiz do projeto, com a `.venv` ativa, carregue a configuração local e verifique a coleta:
-
-```bash
-set -a
-source .env
-set +a
-python manage.py check
-python manage.py collectstatic --noinput
-```
-
-O comando deve informar a quantidade de arquivos coletados ou já presentes. Confira, por exemplo, `staticfiles/admin/css/base.css` e `staticfiles/rest_framework/css/bootstrap.min.css`. Essa preparação não consulta o banco nem aplica migrations.
-
-Com `STATIC_ROOT` configurado, a Vercel executa a coleta automaticamente durante a preparação da publicação e distribui os arquivos em `STATIC_URL`. [Suporte oficial a arquivos estáticos do Django](https://vercel.com/docs/frameworks/full-stack/django#serving-static-assets). A coleta local foi verificada, os logs de build confirmam a execução de `collectstatic` e as páginas publicadas do DRF e do admin foram visualizadas com estilos. As respostas HTTP dos arquivos individuais ainda não foram inspecionadas.
-
-## Ferramentas de testes
-
-`pytest.ini` indica `config.settings` para inicializar Django e procura arquivos chamados `test_*.py`. `tests/test_health.py` verifica a saúde pública, a rejeição de POST e, com `DEBUG=False`, a aceitação do host permitido e a rejeição de outro com `400`. Esse erro de host é produzido pelo Django e não precisa ter corpo JSON.
-
-`tests/test_webhook_endpoints.py` cobre URLs permitidas/proibidas, componentes inseguros, IPs locais, formato do tipo, campos obrigatórios, persistência e duplicidade, inclusive a restrição no PostgreSQL. `tests/test_webhook_admin.py` cobre cadastro e consulta pelo operador, rejeição de entradas inválidas, acesso por perfil/permissão, proteção CSRF e bloqueio de edição/exclusão. Os testes de autorização usam sessões criadas por `force_login` para isolar as permissões; isso não simula digitação de senha ou verifica login/cookies na hospedagem.
-
-`tests/test_event_payload.py` cobre formato, tamanho e valores permitidos nos dados JSON, sem acessar o banco. `tests/test_events.py` cobre persistência de eventos e estados permitidos, compatibilidade de tipo, revalidação do destino e referências inexistentes. Também verifica as restrições do PostgreSQL, a proteção do destino contra exclusão e a criação de IDs distintos para avisos com conteúdo repetido.
-
-`tests/test_event_serializers.py` verifica o contrato de entrada e saída, os campos obrigatórios, a rejeição de campos controlados pela aplicação e a transformação do ID recebido em um destino. Exercita a validação diretamente no serializer, sem fazer requisições HTTP.
-
-`tests/test_event_api.py` cobre registro/consulta HTTP, rejeições representativas de entrada, JSON incorreto, formato do contrato, perfis e permissões de acesso, CSRF, métodos rejeitados e repetição de cadastros. Um teste usa login com senha e HTTPS simulado para exercitar sessão, CSRF e cookies Secure; os demais testes de autorização isolam as permissões com `force_login`. Nenhuma conta permanente ou credencial hospedada é criada por essa suíte.
-
-`tests/test_delivery_attempts.py` cobre início e conclusão de uma tentativa, resultados HTTP e falhas sem resposta, limite de uma tentativa por evento, referência obrigatória a um evento existente e proteção contra sua exclusão. Verifica rejeição de horários e resultados incoerentes tanto por `full_clean()` quanto pelo PostgreSQL em escrita direta. Os resultados são dados simulados; não há envio HTTP externo.
-
-`tests/test_delivery_destination.py` verifica revalidação da URL, IPs públicos/proibidos, respostas DNS mistas, mudanças de DNS e preparação de domínio/caminho. O resolvedor é simulado, sem consultas externas ou acesso ao banco.
-
-`tests/test_delivery_http.py` usa sockets/TLS simulados e o parser HTTP real do Python para verificar conexão ao IP aprovado com hostname original, falhas de certificado/rede/timeout, limpeza dos recursos, POST JSON, headers definidos pela aplicação, redirecionamentos bloqueados e limites de tempo/bytes. Isso não comprova handshake TLS nem entrega a um receptor real. Esses testes não acessam o banco.
-
-`tests/test_delivery_service.py` verifica início, envelope, resultados, atualização de estado, revalidação dos dados, transações e bloqueio de repetição. Simula o transporte e falhas de gravação, incluindo preservação de tentativa incompleta após interrupção ou falha na conclusão. Não faz HTTP externo.
-
-`tests/test_delivery_concurrency.py` usa duas conexões reais ao PostgreSQL e sincroniza duas solicitações sobre o mesmo evento. Confirma uma tentativa e, no cenário de envio, uma única chamada ao transporte simulado. Threads são usadas somente no teste; a aplicação continua síncrona.
-
-Após instalar as dependências de desenvolvimento, confirme a instalação:
-
-```bash
-python -m pip check
-python -m pytest --version
-```
-
-Execute com a `.venv` ativa e as variáveis do `.env` carregadas:
-
-```bash
-python -m pytest -q
-```
-
-Os testes HTTP da API usam o cliente interno do Django, sem servidor HTTP externo. A saúde e as validações isoladas não acessam o banco; persistência, admin e coordenação usam `pytest-django` em um banco separado, com prefixo `test_`, no PostgreSQL local. Execute-os com configurações locais, nunca apontando a suíte ao Neon. Os receptores fictícios são valores de teste: nenhum HTTP ou DNS externo é executado para validá-los. Nenhum teste encontrado (código 5) não significa aprovação.
-
-A rota de envio e o exemplo com receptor real serão acrescentados conforme a implementação avançar.
+Retry automático, assinatura HMAC, chave de idempotência, filas e processamento em segundo plano ficam para evolução. O serviço permanece restrito ao operador até a preparação da demonstração com receptores controlados.
 
 ## Licença
 

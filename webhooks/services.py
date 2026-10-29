@@ -3,6 +3,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .delivery import DeliveryResult, post_json
+from .limits import check_delivery_limits
 from .models import DeliveryAttempt, Event
 
 
@@ -11,7 +12,11 @@ class DeliveryAlreadyStarted(Exception):
         super().__init__('Este evento já possui uma tentativa ou não está pendente.')
 
 
-def _start_delivery(event_id):
+class InvalidEventForDelivery(ValidationError):
+    pass
+
+
+def _start_delivery(event_id, initiated_by=None):
     with transaction.atomic(durable=True):
         event = Event.objects.get(pk=event_id)
         if event.status != Event.Status.PENDING or DeliveryAttempt.objects.filter(
@@ -19,19 +24,23 @@ def _start_delivery(event_id):
         ).exists():
             raise DeliveryAlreadyStarted
 
-        event.full_clean()
+        try:
+            event.full_clean()
+        except ValidationError as error:
+            raise InvalidEventForDelivery(error) from None
         updated = Event.objects.filter(
             pk=event.pk, status=Event.Status.PENDING,
         ).update(status=Event.Status.SENDING)
         if not updated:
             raise DeliveryAlreadyStarted
 
+        check_delivery_limits(initiated_by)
         event.status = Event.Status.SENDING
-        return DeliveryAttempt.objects.create(event=event)
+        return DeliveryAttempt.objects.create(event=event, initiated_by=initiated_by)
 
 
-def deliver_event(event_id):
-    attempt = _start_delivery(event_id)
+def deliver_event(event_id, initiated_by=None):
+    attempt = _start_delivery(event_id, initiated_by=initiated_by)
     event = attempt.event
     data = {
         'id': str(event.pk),

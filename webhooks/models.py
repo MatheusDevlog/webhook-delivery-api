@@ -1,5 +1,6 @@
 import uuid
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
@@ -78,6 +79,7 @@ class Event(models.Model):
         verbose_name = 'evento'
         verbose_name_plural = 'eventos'
         default_permissions = ('add', 'view')
+        permissions = [('send_event', 'Pode enviar eventos de webhook')]
         constraints = [
             models.CheckConstraint(
                 condition=models.Q(status__in=['pending', 'sending', 'delivered', 'failed']),
@@ -131,6 +133,15 @@ class DeliveryAttempt(models.Model):
         verbose_name='evento',
         on_delete=models.PROTECT,
         related_name='delivery_attempt',
+    )
+    initiated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name='iniciada por',
+        on_delete=models.SET_NULL,
+        related_name='webhook_delivery_attempts',
+        null=True,
+        blank=True,
+        editable=False,
     )
     started_at = models.DateTimeField(
         'iniciada em', default=timezone.now, editable=False,
