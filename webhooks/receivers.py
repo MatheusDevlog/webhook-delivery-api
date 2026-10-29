@@ -63,12 +63,14 @@ class DemoEnvelopeSerializer(serializers.Serializer):
         return value
 
 
-class DemoSuccessReceiver(APIView):
+class DemoReceiver(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
     parser_classes = [DemoJSONParser]
     renderer_classes = [JSONRenderer]
     http_method_names = ['post']
+    response_status = 200
+    result = 'received'
 
     def initial(self, request, *args, **kwargs):
         if not settings.WEBHOOK_DEMO_RECEIVER_ENABLED:
@@ -79,5 +81,5 @@ class DemoSuccessReceiver(APIView):
         serializer = DemoEnvelopeSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         return Response({
-            'status': 'received', 'event_id': str(serializer.validated_data['id']),
-        }, headers={'Cache-Control': 'no-store'})
+            'status': self.result, 'event_id': str(serializer.validated_data['id']),
+        }, status=self.response_status, headers={'Cache-Control': 'no-store'})
