@@ -4,7 +4,7 @@ Projeto de backend para registrar eventos, enviar webhooks a destinos autorizado
 
 ## Estado atual
 
-A aplicação usa Django e DRF, com PostgreSQL e execução local por Docker Compose. Existe uma rota de saúde, cadastro de destinos autorizados pelo admin Django, endpoints restritos para registrar e consultar eventos, um modelo para armazenar tentativas e transporte HTTPS interno, com testes automatizados. A integração do transporte com tentativas/estados, a rota de envio e a demonstração interativa ainda não foram implementadas.
+A aplicação usa Django e DRF, com PostgreSQL e execução local por Docker Compose. Existe uma rota de saúde, cadastro de destinos autorizados pelo admin Django, endpoints restritos para registrar e consultar eventos e coordenação interna de entrega com transporte HTTPS, persistência das tentativas e atualização de estados, com testes automatizados. A rota de envio e a demonstração interativa ainda não foram implementadas; a entrega a um receptor real ainda não foi verificada.
 
 A base está publicada na Vercel. A conexão ao PostgreSQL no Neon foi verificada pelo terminal com criptografia exigida, e a consulta pela aplicação hospedada foi verificada pelo fluxo de autenticação do admin. Cada ambiente precisa das migrations correspondentes ao código publicado; não presuma que gerar ou aplicar uma migration localmente atualiza o Neon.
 
@@ -99,12 +99,21 @@ O modelo `Event` representa um aviso destinado a um único `WebhookEndpoint`. Po
 | `endpoint` | Referência ao destino cadastrado, protegida contra exclusão enquanto houver eventos vinculados. |
 | `event_type` | Tipo do aviso, que deve corresponder ao tipo cadastrado no destino. |
 | `payload` | Dados do aviso em um objeto JSON. |
-| `status` | Estado inicial `pending` (pendente), sem edição em formulários. |
+| `status` | Estado controlado pela aplicação, inicialmente `pending`, sem edição em formulários. |
 | `created_at` | Data e hora do registro, preenchidas automaticamente. |
 
 `Event.full_clean()` valida os dados e verifica novamente se a URL do destino continua autorizada. Não realiza HTTP nem DNS. `payload` aceita objetos, inclusive `{}`, com valores JSON válidos; seu tamanho máximo é 16 KiB (16.384 bytes), medido em JSON compacto codificado em UTF-8. Rejeita números não finitos, chaves que não sejam textos, Unicode inválido e o caractere nulo U+0000, incompatível com o armazenamento JSONB do PostgreSQL.
 
-O banco exige um destino existente e, nesta etapa, permite somente o estado `pending`. Estados de entrega dependerão de implementação e migration próprias. Registrar dois avisos iguais gera eventos com IDs diferentes: não existe deduplicação por conteúdo ou chave de idempotência.
+O banco exige um destino existente e um dos estados abaixo. A migration `webhooks/0004_event_delivery_states` amplia os valores permitidos e as categorias da tentativa; deve ser aplicada em cada banco antes de usar a coordenação de entrega.
+
+| Estado | Significado |
+| --- | --- |
+| `pending` | Evento registrado, sem envio iniciado pelo serviço. |
+| `sending` | Início da tentativa registrado, sem resultado final persistido. |
+| `delivered` | Tentativa concluída com resposta HTTP 200–299. |
+| `failed` | Tentativa concluída sem resposta HTTP de sucesso. |
+
+`delivered` não comprova o processamento interno do receptor; `failed` por timeout não comprova ausência de recebimento. A restrição de estados não controla, sozinha, sua ordem ou a relação com a tentativa; essa coordenação está em `services.py`. Registrar dois avisos iguais gera eventos com IDs diferentes: não existe deduplicação por conteúdo ou chave de idempotência.
 
 Em escritas diretas pelo ORM, chame `full_clean()` antes de `save()`; salvar não executa essa validação automaticamente. O serializer da API executa `full_clean()` antes de permitir a criação e devolve erros de validação associados aos campos da requisição. Não há formulário de eventos no admin. Salvar um evento não dispara envio. Cada banco precisa receber sua migration antes de usar essa tabela.
 
@@ -119,28 +128,57 @@ Em escritas diretas pelo ORM, chame `full_clean()` antes de `save()`; salvar nã
 | `started_at` | Início, preenchido por padrão com o horário atual. |
 | `finished_at` | Término; vazio enquanto não houver resultado registrado. |
 | `http_status` | Resposta HTTP final entre 200 e 599, quando recebida. |
-| `error_code` | Vazio ou uma categoria: `http_error`, `network_error` ou `timeout`. |
+| `error_code` | Vazio ou uma categoria: `http_error`, `network_error`, `timeout` ou `destination_rejected`. |
 
-O PostgreSQL permite no máximo uma tentativa por evento neste MVP. A relação `OneToOneField` impede um segundo registro; não garante, sozinha, que um futuro serviço não faça duas chamadas de rede. Retry exigirá rever esse limite e o fluxo de envio.
+O PostgreSQL permite no máximo uma tentativa por evento neste MVP. A relação `OneToOneField` impede um segundo registro; o início único da chamada é coordenado pelo serviço descrito abaixo. Retry exigirá rever esse limite e o fluxo de envio.
 
 As restrições do modelo e do banco permitem somente estas combinações:
 
 - Em andamento: sem término, sem código HTTP e sem categoria de falha.
 - Resposta HTTP 200–299: com término e sem categoria de falha.
 - Resposta HTTP 300–599: com término e categoria `http_error`.
-- Falha sem resposta HTTP: com término, sem código HTTP e categoria `network_error` ou `timeout`.
+- Falha sem resposta HTTP: com término, sem código HTTP e categoria `network_error`, `timeout` ou `destination_rejected`.
 
 O término não pode ser anterior ao início. Por exemplo, uma resposta 500 exige `http_error`; um timeout não recebe um código HTTP inventado. Timeout ou falha de comunicação não comprovam que o destinatário deixou de receber o evento. Uma resposta 2xx também não comprova que o destinatário concluiu seu processamento interno.
 
 `full_clean()` verifica as regras antes de salvar, e as restrições do PostgreSQL também protegem escritas que pulem essa validação. Não há armazenamento de corpo/headers da resposta nem de texto livre de exceções. O modelo gera somente a permissão de consulta; não está registrado no admin e não possui rota ou serializer próprios.
 
-Nesta etapa, cadastrar um evento não cria uma tentativa. O modelo apenas prepara a persistência; não faz HTTP, não coordena transações ou concorrência e não altera `Event.status`, que continua `pending`. Um registro sem término representa resultado ainda não registrado, inclusive se a execução futura for interrompida; não autoriza recuperação ou novo envio automático.
+Cadastrar um evento não cria uma tentativa. O modelo armazena os dados; `deliver_event()` coordena o envio e as alterações de estado. Um registro sem término representa resultado ainda não registrado, inclusive se a execução for interrompida; não autoriza recuperação ou novo envio automático.
+
+## Coordenação interna da entrega
+
+`webhooks/services.py` contém `deliver_event(event_id)`, uma função síncrona que retorna a tentativa concluída quando consegue persistir o resultado. Não está ligada a uma view, rota ou ação do admin. A API de cadastro continua salvando somente um evento `pending`; o envio precisa ser solicitado separadamente por uma futura rota com controles próprios.
+
+O fluxo tem duas transações curtas, com o POST HTTPS entre elas:
+
+1. Revalidar os dados do evento e a autorização da URL, exigir `pending` e ausência de tentativa, atualizar condicionalmente para `sending` e criar a tentativa sem resultado. Estado e tentativa são confirmados juntos antes da rede.
+2. Montar o envelope e chamar `post_json()` fora da transação. O transporte revalida o destino e aplica a política de DNS/IP/TLS.
+3. Validar e salvar término, código HTTP e categoria de falha, atualizando o evento na mesma transação final: `delivered` para HTTP 200–299; `failed` para HTTP 300–599, falha de comunicação, timeout ou rejeição do destino.
+
+O envelope enviado tem este formato, com valores ilustrativos:
+
+```json
+{
+  "id": "22222222-2222-4222-8222-222222222222",
+  "event_type": "pedido.pago",
+  "created_at": "2026-10-28T12:00:00+00:00",
+  "payload": {"pedido_id": 123}
+}
+```
+
+`id` identifica o evento, e `created_at` usa ISO 8601. O payload continua limitado a 16 KiB; o envelope completo cabe nos 17 KiB aceitos pelo transporte.
+
+O início usa uma atualização condicional no PostgreSQL: somente um concorrente consegue mudar o mesmo evento de `pending` para `sending`. Os demais recebem `DeliveryAlreadyStarted`, assim como solicitações repetidas após conclusão ou interrupção. As transações usam `atomic(durable=True)` para exigir confirmação própria; o serviço não deve ser chamado dentro de outra transação comum. Não há fila, retry ou reenvio automático.
+
+Dados inválidos ou URL desautorizada detectados antes do início deixam o evento `pending`, sem tentativa. Uma rejeição da URL/IP pelo transporte após o início é registrada como `destination_rejected`, sem código HTTP. Erros internos de construção/tamanho do envelope propagam sem serem classificados como rejeição de destino.
+
+Se houver interrupção, falha inesperada ou erro ao persistir o resultado final, o início já confirmado permanece: evento `sending` e tentativa sem término, com recebimento possivelmente incerto. Uma nova chamada é recusada; não há recuperação automática. Retirar a URL da autorização depois de uma resposta não apaga o resultado observado. Não executar esse serviço contra o domínio fictício dos exemplos; a prática de envio depende de receptor real controlado.
 
 ## Transporte HTTPS interno
 
 `webhooks/delivery.py` contém `post_json(url, data)`, que recebe uma URL e um objeto JSON, faz um único POST HTTPS e devolve `DeliveryResult(http_status, error_code)`. O transporte não consulta ou grava eventos/tentativas e não está ligado às views. Registrar um evento continua criando somente `Event` com estado `pending`.
 
-O chamador deve validar os dados de negócio e montar o objeto enviado; o contrato do envelope de um evento será definido na integração com o envio. O transporte codifica esse objeto em JSON compacto UTF-8 e limita o corpo completo a 17 KiB, reservando espaço para metadados além dos 16 KiB de payload permitidos na API. JSON inválido ou corpo maior que esse limite gera `ValidationError` antes do DNS.
+O chamador deve validar os dados de negócio e montar o objeto enviado; `deliver_event()` usa o envelope descrito acima. O transporte codifica esse objeto em JSON compacto UTF-8 e limita o corpo completo a 17 KiB, reservando espaço para metadados além dos 16 KiB de payload permitidos na API. JSON inválido ou corpo maior que esse limite gera `ValidationError` antes do DNS.
 
 O fluxo interno é: revalidar URL autorizada → resolver domínio → conferir IPs → conectar ao IP aprovado → negociar TLS para o domínio original → POST → ler o resultado.
 
@@ -167,7 +205,7 @@ URL desautorizada, IP proibido ou domínio inválido gera `ValidationError` para
 
 O parser HTTP é o da biblioteca padrão Python. Um leitor limitado controla tempo e bytes; o corpo da resposta não é consumido integralmente. O buffer pode antecipar alguns bytes do corpo, sempre dentro da cota. Não há limite global que inclua DNS e todas as fases do envio. [Cliente HTTP do Python](https://docs.python.org/3.14/library/http.client.html).
 
-O comportamento foi verificado com rede/DNS/TLS simulados e parser HTTP real. A entrega a um receptor real controlado ainda não foi verificada. Antes de expor envio, faltam a coordenação de tentativa/estado/concorrência, acesso, limites de uso, orçamento global e retenção; essa função interna, sozinha, não é uma demonstração pública de webhooks.
+O comportamento foi verificado com rede/DNS/TLS simulados e parser HTTP real. A entrega a um receptor real controlado ainda não foi verificada. Antes de expor envio, faltam a rota, sua política de acesso, limites de uso, orçamento global e retenção; as funções internas, sozinhas, não são uma demonstração pública de webhooks.
 
 ## Registro e consulta de eventos
 
@@ -468,7 +506,7 @@ Com `STATIC_ROOT` configurado, a Vercel executa a coleta automaticamente durante
 
 `tests/test_webhook_endpoints.py` cobre URLs permitidas/proibidas, componentes inseguros, IPs locais, formato do tipo, campos obrigatórios, persistência e duplicidade, inclusive a restrição no PostgreSQL. `tests/test_webhook_admin.py` cobre cadastro e consulta pelo operador, rejeição de entradas inválidas, acesso por perfil/permissão, proteção CSRF e bloqueio de edição/exclusão. Os testes de autorização usam sessões criadas por `force_login` para isolar as permissões; isso não simula digitação de senha ou verifica login/cookies na hospedagem.
 
-`tests/test_event_payload.py` cobre formato, tamanho e valores permitidos nos dados JSON, sem acessar o banco. `tests/test_events.py` cobre persistência de eventos pendentes, compatibilidade de tipo, revalidação do destino e referências inexistentes. Também verifica as restrições do PostgreSQL, a proteção do destino contra exclusão e a criação de IDs distintos para avisos com conteúdo repetido.
+`tests/test_event_payload.py` cobre formato, tamanho e valores permitidos nos dados JSON, sem acessar o banco. `tests/test_events.py` cobre persistência de eventos e estados permitidos, compatibilidade de tipo, revalidação do destino e referências inexistentes. Também verifica as restrições do PostgreSQL, a proteção do destino contra exclusão e a criação de IDs distintos para avisos com conteúdo repetido.
 
 `tests/test_event_serializers.py` verifica o contrato de entrada e saída, os campos obrigatórios, a rejeição de campos controlados pela aplicação e a transformação do ID recebido em um destino. Exercita a validação diretamente no serializer, sem fazer requisições HTTP.
 
@@ -479,6 +517,10 @@ Com `STATIC_ROOT` configurado, a Vercel executa a coleta automaticamente durante
 `tests/test_delivery_destination.py` verifica revalidação da URL, IPs públicos/proibidos, respostas DNS mistas, mudanças de DNS e preparação de domínio/caminho. O resolvedor é simulado, sem consultas externas ou acesso ao banco.
 
 `tests/test_delivery_http.py` usa sockets/TLS simulados e o parser HTTP real do Python para verificar conexão ao IP aprovado com hostname original, falhas de certificado/rede/timeout, limpeza dos recursos, POST JSON, headers definidos pela aplicação, redirecionamentos bloqueados e limites de tempo/bytes. Isso não comprova handshake TLS nem entrega a um receptor real. Esses testes não acessam o banco.
+
+`tests/test_delivery_service.py` verifica início, envelope, resultados, atualização de estado, revalidação dos dados, transações e bloqueio de repetição. Simula o transporte e falhas de gravação, incluindo preservação de tentativa incompleta após interrupção ou falha na conclusão. Não faz HTTP externo.
+
+`tests/test_delivery_concurrency.py` usa duas conexões reais ao PostgreSQL e sincroniza duas solicitações sobre o mesmo evento. Confirma uma tentativa e, no cenário de envio, uma única chamada ao transporte simulado. Threads são usadas somente no teste; a aplicação continua síncrona.
 
 Após instalar as dependências de desenvolvimento, confirme a instalação:
 
@@ -493,9 +535,9 @@ Execute com a `.venv` ativa e as variáveis do `.env` carregadas:
 python -m pytest -q
 ```
 
-Os testes usam o cliente interno do Django, sem servidor HTTP externo. A saúde e as validações isoladas não acessam o banco; persistência e admin usam `pytest-django` em um banco separado, com prefixo `test_`, no PostgreSQL local. Execute-os com configurações locais, nunca apontando a suíte ao Neon. Os receptores fictícios são valores de teste: nenhum HTTP ou DNS externo é executado para validá-los. Nenhum teste encontrado (código 5) não significa aprovação.
+Os testes HTTP da API usam o cliente interno do Django, sem servidor HTTP externo. A saúde e as validações isoladas não acessam o banco; persistência, admin e coordenação usam `pytest-django` em um banco separado, com prefixo `test_`, no PostgreSQL local. Execute-os com configurações locais, nunca apontando a suíte ao Neon. Os receptores fictícios são valores de teste: nenhum HTTP ou DNS externo é executado para validá-los. Nenhum teste encontrado (código 5) não significa aprovação.
 
-Os exemplos dos endpoints de webhooks serão acrescentados conforme a implementação avançar.
+A rota de envio e o exemplo com receptor real serão acrescentados conforme a implementação avançar.
 
 ## Licença
 

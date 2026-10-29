@@ -49,6 +49,9 @@ class WebhookEndpoint(models.Model):
 class Event(models.Model):
     class Status(models.TextChoices):
         PENDING = 'pending', 'Pendente'
+        SENDING = 'sending', 'Em envio'
+        DELIVERED = 'delivered', 'Entregue via HTTP'
+        FAILED = 'failed', 'Tentativa sem sucesso'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     endpoint = models.ForeignKey(
@@ -77,10 +80,10 @@ class Event(models.Model):
         default_permissions = ('add', 'view')
         constraints = [
             models.CheckConstraint(
-                condition=models.Q(status='pending'),
+                condition=models.Q(status__in=['pending', 'sending', 'delivered', 'failed']),
                 name='event_valid_status',
                 violation_error_code='invalid_event_status',
-                violation_error_message='O estado do evento deve ser pendente nesta etapa.',
+                violation_error_message='Informe um estado de evento válido.',
             ),
         ]
 
@@ -120,6 +123,7 @@ class DeliveryAttempt(models.Model):
         HTTP_ERROR = 'http_error', 'Resposta HTTP sem sucesso'
         NETWORK_ERROR = 'network_error', 'Falha de comunicação'
         TIMEOUT = 'timeout', 'Tempo limite excedido'
+        DESTINATION_REJECTED = 'destination_rejected', 'Destino rejeitado'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     event = models.OneToOneField(
@@ -179,7 +183,7 @@ class DeliveryAttempt(models.Model):
                     )
                     | models.Q(
                         finished_at__isnull=False, http_status__isnull=True,
-                        error_code__in=['network_error', 'timeout'],
+                        error_code__in=['network_error', 'timeout', 'destination_rejected'],
                     )
                 ),
                 name='attempt_valid_result',
