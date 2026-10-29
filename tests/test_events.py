@@ -1,6 +1,7 @@
 import uuid
 
 import pytest
+from django.contrib.auth.models import Permission
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.db import IntegrityError, connection, transaction
 from django.db.models.deletion import ProtectedError
@@ -173,3 +174,42 @@ def test_repeated_registration_creates_distinct_events(endpoint):
 
     assert first.pk != second.pk
     assert Event.objects.count() == 2
+
+
+@pytest.mark.django_db
+def test_event_permissions_include_sending_without_editing_or_deleting():
+    permissions = Permission.objects.filter(
+        content_type__app_label='webhooks', content_type__model='event',
+    ).values_list('codename', flat=True)
+
+    assert set(permissions) == {'add_event', 'view_event', 'send_event'}
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('permissions', [
+    [], ['add_event'], ['view_event'], ['add_event', 'view_event'],
+])
+def test_staff_does_not_gain_sending_permission_from_existing_permissions(
+    django_user_model, permissions,
+):
+    user = django_user_model.objects.create_user(username='operator', is_staff=True)
+    user.user_permissions.set(Permission.objects.filter(
+        content_type__app_label='webhooks', content_type__model='event',
+        codename__in=permissions,
+    ))
+
+    assert not user.has_perm('webhooks.send_event')
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('active', [True, False])
+def test_explicit_sending_permission_requires_active_user(django_user_model, active):
+    user = django_user_model.objects.create_user(
+        username='sender', is_staff=True, is_active=active,
+    )
+    user.user_permissions.add(Permission.objects.get(
+        content_type__app_label='webhooks', content_type__model='event',
+        codename='send_event',
+    ))
+
+    assert user.has_perm('webhooks.send_event') == active

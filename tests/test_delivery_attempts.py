@@ -153,3 +153,55 @@ def test_event_with_attempt_is_protected_from_deletion(event):
 
     assert Event.objects.filter(pk=event.pk).exists()
     assert DeliveryAttempt.objects.filter(pk=attempt.pk).exists()
+
+
+def test_attempt_can_remain_without_operator_for_existing_records(event):
+    attempt = DeliveryAttempt(event=event)
+    attempt.full_clean()
+    attempt.save()
+    attempt.refresh_from_db()
+
+    assert attempt.initiated_by_id is None
+    assert attempt.event_id == event.pk
+
+
+def test_persists_operator_who_initiated_attempt(event, django_user_model):
+    user = django_user_model.objects.create_user(username='sender', is_staff=True)
+    attempt = DeliveryAttempt(event=event, initiated_by=user)
+    attempt.full_clean()
+    attempt.save()
+    attempt.refresh_from_db()
+
+    assert attempt.initiated_by_id == user.pk
+    assert user.webhook_delivery_attempts.get().pk == attempt.pk
+
+
+def test_deleting_operator_preserves_attempt_and_event(event, django_user_model):
+    user = django_user_model.objects.create_user(username='sender', is_staff=True)
+    attempt = DeliveryAttempt.objects.create(event=event, initiated_by=user)
+    started_at = attempt.started_at
+
+    user.delete()
+    attempt.refresh_from_db()
+
+    assert attempt.initiated_by_id is None
+    assert attempt.event_id == event.pk
+    assert attempt.started_at == started_at
+    assert Event.objects.filter(pk=event.pk).exists()
+
+
+def test_attempt_operator_must_reference_existing_user(event, django_user_model):
+    user = django_user_model.objects.create_user(username='removed')
+    user_id = user.pk
+    user.delete()
+    values = {'event': event, 'initiated_by_id': user_id}
+
+    with pytest.raises(ValidationError) as error:
+        DeliveryAttempt(**values).full_clean()
+
+    assert 'initiated_by' in error.value.message_dict
+    with pytest.raises(IntegrityError), transaction.atomic():
+        DeliveryAttempt.objects.create(**values)
+        connection.check_constraints()
+
+    assert not DeliveryAttempt.objects.exists()
