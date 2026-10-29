@@ -8,7 +8,7 @@ Exemplo: uma loja registra `pedido.pago` com o ID de um pedido, solicita o envio
 
 **Stack:** Python 3.14, Django 5.2, DRF, PostgreSQL 17, Docker Compose e pytest. Uma aplicação Django, com execução síncrona e uma tentativa por evento.
 
-**Em desenvolvimento:** o fluxo de envio tem testes com transporte simulado; a verificação HTTPS ponta a ponta e a interface para visitantes estão pendentes. Envios e receptores de demonstração ficam desabilitados por padrão.
+**Em desenvolvimento:** o fluxo HTTPS foi verificado manualmente com receptores controlados neste projeto e resultados salvos no Neon. A interface para visitantes ainda está pendente. Envios e receptores de demonstração ficam desabilitados por padrão.
 
 [Saúde da base publicada](https://webhook-delivery-api.vercel.app/api/saude/) — confirma que a aplicação responde; não verifica banco ou entrega de webhooks. Ainda não há página inicial em `/`.
 
@@ -126,7 +126,9 @@ Desativados por padrão, retornam `404`. `WEBHOOK_DEMO_RECEIVER_ENABLED=True` ha
 
 Exigem envelope JSON UTF-8 com `id` UUID, `created_at` válido, `event_type: pedido.pago` e `payload: {"pedido_id": 123}`, sem campos extras. A resposta inclui `event_id`; o corpo é limitado a 17 KiB. Dados inválidos retornam `400`, outros métodos `405`, excesso de tamanho `413` e formato incompatível `415`.
 
-Os receptores não gravam dados nem fazem envios. Para uma entrega HTTPS, cadastre a URL pública exata em `WEBHOOK_ALLOWED_URLS` e no admin, prepare um orçamento positivo e siga o fluxo da API. A ativação dos receptores sozinha não libera envios. Chamadas pela internet consomem recursos da hospedagem; a verificação desse percurso ainda está pendente.
+Os receptores não gravam dados nem fazem envios. Para uma entrega HTTPS, cadastre a URL pública exata em `WEBHOOK_ALLOWED_URLS` e no admin, prepare um orçamento positivo e siga o fluxo da API. A ativação dos receptores sozinha não libera envios. Chamadas pela internet consomem recursos da hospedagem.
+
+**Verificação real em Vercel/Neon:** dois eventos fictícios foram enviados por HTTPS aos receptores desta aplicação. O sucesso ficou `delivered`/HTTP `200`; a falha controlada ficou `failed`/HTTP `500`/`http_error`. Os resultados foram persistidos e consultados pela API com `200`. Os receptores foram desativados após a verificação.
 
 ## Segurança e limites
 
