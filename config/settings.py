@@ -43,6 +43,8 @@ WEBHOOK_ALLOWED_URLS = [
     if url.strip()
 ]
 
+WEBHOOK_DEMO_RECEIVER_ENABLED = os.environ.get('WEBHOOK_DEMO_RECEIVER_ENABLED', 'False') == 'True'
+
 
 def _read_nonnegative_integer(name, default):
     try:
