@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import DeliveryAttemptDetailView, EventCreateView, EventDetailView
+from .views import DeliveryAttemptDetailView, EventCreateView, EventDetailView, EventSendView
 
 
 app_name = 'webhooks'
@@ -13,4 +13,5 @@ urlpatterns = [
         DeliveryAttemptDetailView.as_view(),
         name='delivery-attempt-detail',
     ),
+    path('eventos/<uuid:pk>/enviar/', EventSendView.as_view(), name='event-send'),
 ]

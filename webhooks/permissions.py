@@ -13,3 +13,8 @@ class EventModelPermissions(DjangoModelPermissions):
 class CanViewDeliveryAttempt(BasePermission):
     def has_permission(self, request, view):
         return request.user.has_perm('webhooks.view_deliveryattempt')
+
+
+class CanSendEvent(BasePermission):
+    def has_permission(self, request, view):
+        return request.user.has_perm('webhooks.send_event')

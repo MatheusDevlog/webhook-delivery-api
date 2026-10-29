@@ -12,6 +12,10 @@ class DeliveryAlreadyStarted(Exception):
         super().__init__('Este evento já possui uma tentativa ou não está pendente.')
 
 
+class InvalidEventForDelivery(ValidationError):
+    pass
+
+
 def _start_delivery(event_id, initiated_by=None):
     with transaction.atomic(durable=True):
         event = Event.objects.get(pk=event_id)
@@ -20,7 +24,10 @@ def _start_delivery(event_id, initiated_by=None):
         ).exists():
             raise DeliveryAlreadyStarted
 
-        event.full_clean()
+        try:
+            event.full_clean()
+        except ValidationError as error:
+            raise InvalidEventForDelivery(error) from None
         updated = Event.objects.filter(
             pk=event.pk, status=Event.Status.PENDING,
         ).update(status=Event.Status.SENDING)

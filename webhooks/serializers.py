@@ -64,3 +64,14 @@ class DeliveryAttemptSerializer(serializers.ModelSerializer):
             'http_status', 'error_code',
         )
         read_only_fields = fields
+
+
+class DeliveryRequestSerializer(serializers.Serializer):
+    def to_internal_value(self, data):
+        if not isinstance(data, Mapping) or data:
+            raise serializers.ValidationError({
+                api_settings.NON_FIELD_ERRORS_KEY: [
+                    'Envie somente um objeto JSON vazio, sem campos adicionais.',
+                ],
+            })
+        return {}
