@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 from rest_framework.settings import api_settings
 
-from .models import Event, WebhookEndpoint
+from .models import DeliveryAttempt, Event, WebhookEndpoint
 
 
 class EventSerializer(serializers.ModelSerializer):
@@ -49,3 +49,18 @@ class EventSerializer(serializers.ModelSerializer):
                 for name, messages in error.message_dict.items()
             }) from error
         return attrs
+
+
+class DeliveryAttemptSerializer(serializers.ModelSerializer):
+    event_id = serializers.UUIDField(read_only=True, label='Evento')
+    event_status = serializers.CharField(
+        source='event.status', read_only=True, label='Estado do evento',
+    )
+
+    class Meta:
+        model = DeliveryAttempt
+        fields = (
+            'id', 'event_id', 'event_status', 'started_at', 'finished_at',
+            'http_status', 'error_code',
+        )
+        read_only_fields = fields
