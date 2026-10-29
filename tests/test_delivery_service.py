@@ -18,6 +18,8 @@ pytestmark = pytest.mark.django_db(transaction=True)
 @pytest.fixture
 def event(settings):
     settings.WEBHOOK_ALLOWED_URLS = ['https://receiver.example/webhook']
+    settings.WEBHOOK_MAX_DELIVERIES_PER_MINUTE = 3
+    settings.WEBHOOK_MAX_DELIVERIES_PER_DAY = 20
     endpoint = WebhookEndpoint.objects.create(
         url=settings.WEBHOOK_ALLOWED_URLS[0], event_type='pedido.pago',
     )

@@ -13,6 +13,8 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -40,6 +42,24 @@ WEBHOOK_ALLOWED_URLS = [
     for url in os.environ.get('WEBHOOK_ALLOWED_URLS', '').split(',')
     if url.strip()
 ]
+
+
+def _read_nonnegative_integer(name, default):
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except ValueError:
+        raise ImproperlyConfigured(f'{name} deve ser um inteiro maior ou igual a zero.') from None
+    if value < 0:
+        raise ImproperlyConfigured(f'{name} deve ser um inteiro maior ou igual a zero.')
+    return value
+
+
+WEBHOOK_MAX_DELIVERIES_PER_MINUTE = _read_nonnegative_integer(
+    'WEBHOOK_MAX_DELIVERIES_PER_MINUTE', 3,
+)
+WEBHOOK_MAX_DELIVERIES_PER_DAY = _read_nonnegative_integer(
+    'WEBHOOK_MAX_DELIVERIES_PER_DAY', 0,
+)
 
 
 # Application definition
