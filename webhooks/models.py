@@ -143,6 +143,10 @@ class DeliveryAttempt(models.Model):
         blank=True,
         editable=False,
     )
+    visitor_id = models.UUIDField(
+        'identificador do visitante',
+        null=True, blank=True, editable=False, db_index=True,
+    )
     started_at = models.DateTimeField(
         'iniciada em', default=timezone.now, editable=False,
     )
