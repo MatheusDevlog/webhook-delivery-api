@@ -160,6 +160,10 @@ def test_home_renders_controlled_example_and_prepares_safe_browser_controls(brow
     }
     assert {attrs['id'] for attrs in buttons} == {'send-success', 'send-failure', 'consult-result'}
     assert all(attrs['type'] == 'button' and 'disabled' in attrs for attrs in buttons)
+    assert 'Conferir resultado salvo' in html
+    confirmation = next(attrs for tag, attrs in page.tags if attrs.get('id') == 'consult-confirmation')
+    assert 'hidden' in confirmation and confirmation['role'] == 'status'
+    assert confirmation['aria-live'] == 'polite' and confirmation['aria-atomic'] == 'true'
     csrf_inputs = [attrs for tag, attrs in page.tags if attrs.get('name') == 'csrfmiddlewaretoken']
     assert len(csrf_inputs) == 1
     assert csrf_inputs[0]['type'] == 'hidden' and len(csrf_inputs[0]['value']) == 64

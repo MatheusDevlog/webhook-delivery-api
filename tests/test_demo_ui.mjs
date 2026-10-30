@@ -15,11 +15,12 @@ const reply = (status, data, headers = {}) => ({
   json: async () => { if (data instanceof Error) throw data; return data; },
 });
 
-function page({ enabled = true, responses = [], saved = null, storageBlocked = false } = {}) {
+function page({ enabled = true, responses = [], saved = null, storageBlocked = false, clock = () => '10:42:08' } = {}) {
   const nodes = {};
   for (const id of ['demo-config', 'conteudo', 'send-success', 'send-failure', 'consult-result',
     'result-message', 'result-status', 'result-panel', 'result-event-id', 'result-http-status',
-    'result-error', 'result-json', 'result-data']) {
+    'result-error', 'result-json', 'result-data', 'consult-confirmation',
+    'consult-confirmation-title', 'consult-confirmation-message']) {
     nodes[id] = {
       textContent: '', dataset: {}, attributes: {}, disabled: true, hidden: true,
       setAttribute(name, value) { this.attributes[name] = value; },
@@ -34,9 +35,15 @@ function page({ enabled = true, responses = [], saved = null, storageBlocked = f
   };
   nodes['send-success'].dataset.scenario = 'success';
   nodes['send-failure'].dataset.scenario = 'failure';
+  const classes = new Set();
+  nodes['result-panel'].classList = {
+    add: (name) => classes.add(name), remove: (name) => classes.delete(name),
+    contains: (name) => classes.has(name),
+  };
   let storage = JSON.stringify(saved);
   const calls = [];
   runInNewContext(source, {
+    Date: class extends Date { toLocaleTimeString() { return clock(); } },
     document: {
       getElementById: (id) => nodes[id],
       querySelector: (selector) => {
@@ -88,6 +95,7 @@ test('sucesso envia somente cenário com CSRF e cookies da mesma origem', async 
   assert.equal(ui.nodes['result-status'].textContent, 'Entregue');
   assert.equal(ui.nodes['result-data'].hidden, false);
   assert.equal(ui.nodes['consult-result'].disabled, false);
+  assert.equal(ui.nodes['consult-confirmation'].hidden, true);
   assert.deepEqual(ui.stored(), { eventId, uncertain: false });
   assert.equal(ui.calls.length, 1);
 });
@@ -251,4 +259,70 @@ test('indisponibilidade conhecida mostra mensagem segura sem detalhe interno ou 
   assert.doesNotMatch(ui.nodes['result-message'].textContent, /PRIVATE_CONFIG/);
   assert.equal(ui.stored().uncertain, false);
   assert.equal(ui.calls.length, 1);
+});
+
+for (const [state, status, error, label] of [
+  ['delivered', 200, '', 'Entregue'],
+  ['failed', 500, 'http_error', 'Falha registrada'],
+  ['sending', null, '', 'Em andamento'],
+]) {
+  test(`consulta de ${state} confirma registro e horário sem mudar dados da entrega`, async () => {
+    const data = { ...result(state, status, error), finished_at: state === 'sending' ? null : result().finished_at };
+    const ui = page({ saved: { eventId }, responses: [reply(200, data)] });
+    await ui.click('consult-result');
+
+    assert.equal(ui.nodes['consult-confirmation'].hidden, false);
+    assert.equal(ui.nodes['consult-confirmation-title'].textContent, 'Registro consultado às 10:42:08');
+    assert.equal(ui.nodes['consult-confirmation-message'].textContent, `Resultado salvo: ${label}. Nenhum novo envio foi realizado.`);
+    assert.equal(ui.nodes['result-panel'].classList.contains('consulted'), true);
+    assert.equal(ui.nodes['consult-result'].disabled, false);
+    assert.deepEqual(JSON.parse(ui.nodes['result-json'].textContent), data);
+    assert.deepEqual(ui.calls.map((call) => call.method), ['GET']);
+  });
+}
+
+test('nova consulta atualiza o horário e reinicia destaque mesmo sem mudança de resultado', async () => {
+  let time = '10:42:08';
+  let finish;
+  const pending = new Promise((resolve) => { finish = resolve; });
+  const ui = page({
+    saved: { eventId }, clock: () => time,
+    responses: [reply(200, result()), () => pending],
+  });
+  await ui.click('consult-result');
+  const second = ui.click('consult-result');
+  assert.equal(ui.nodes['consult-confirmation'].hidden, true);
+  assert.equal(ui.nodes['result-panel'].classList.contains('consulted'), false);
+  time = '10:42:09';
+  finish(reply(200, result()));
+  await second;
+
+  assert.equal(ui.nodes['consult-confirmation'].hidden, false);
+  assert.equal(ui.nodes['consult-confirmation-title'].textContent, 'Registro consultado às 10:42:09');
+  assert.equal(ui.nodes['result-panel'].classList.contains('consulted'), true);
+  assert.deepEqual(ui.calls.map((call) => call.method), ['GET', 'GET']);
+});
+
+for (const [reason, failure] of [['404', reply(404, { code: 'not_found' })], ['rede', new Error('network')]]) {
+  test(`consulta com falha de ${reason} oculta confirmação anterior e não mostra outro horário de sucesso`, async () => {
+    const ui = page({ saved: { eventId }, responses: [reply(200, result()), failure] });
+    await ui.click('consult-result');
+    await ui.click('consult-result');
+
+    assert.equal(ui.nodes['consult-confirmation'].hidden, true);
+    assert.equal(ui.nodes['result-panel'].classList.contains('consulted'), false);
+    assert.deepEqual(ui.calls.map((call) => call.method), ['GET', 'GET']);
+  });
+}
+
+test('iniciar outro teste remove confirmação da consulta anterior', async () => {
+  const next = { ...result(), event_id: '33333333-3333-4333-8333-333333333333' };
+  const ui = page({ saved: { eventId }, responses: [reply(200, result()), reply(200, next)] });
+  await ui.click('consult-result');
+  await ui.click('send-success');
+
+  assert.equal(ui.nodes['consult-confirmation'].hidden, true);
+  assert.equal(ui.nodes['result-panel'].classList.contains('consulted'), false);
+  assert.equal(ui.nodes['result-status'].textContent, 'Entregue');
+  assert.deepEqual(ui.calls.map((call) => call.method), ['GET', 'POST']);
 });
