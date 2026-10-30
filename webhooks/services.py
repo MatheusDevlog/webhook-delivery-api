@@ -1,5 +1,5 @@
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import connection, transaction
 from django.utils import timezone
 
 from .delivery import DeliveryResult, post_json
@@ -16,31 +16,38 @@ class InvalidEventForDelivery(ValidationError):
     pass
 
 
+def _reserve_delivery(event, initiated_by=None):
+    if not connection.in_atomic_block:
+        raise RuntimeError('A reserva de entrega exige uma transação ativa.')
+    if event.status != Event.Status.PENDING or DeliveryAttempt.objects.filter(
+        event=event,
+    ).exists():
+        raise DeliveryAlreadyStarted
+
+    try:
+        event.full_clean()
+    except ValidationError as error:
+        raise InvalidEventForDelivery(error) from None
+    updated = Event.objects.filter(
+        pk=event.pk, status=Event.Status.PENDING,
+    ).update(status=Event.Status.SENDING)
+    if not updated:
+        raise DeliveryAlreadyStarted
+
+    check_delivery_limits(initiated_by)
+    event.status = Event.Status.SENDING
+    return DeliveryAttempt.objects.create(event=event, initiated_by=initiated_by)
+
+
 def _start_delivery(event_id, initiated_by=None):
     with transaction.atomic(durable=True):
         event = Event.objects.get(pk=event_id)
-        if event.status != Event.Status.PENDING or DeliveryAttempt.objects.filter(
-            event=event,
-        ).exists():
-            raise DeliveryAlreadyStarted
-
-        try:
-            event.full_clean()
-        except ValidationError as error:
-            raise InvalidEventForDelivery(error) from None
-        updated = Event.objects.filter(
-            pk=event.pk, status=Event.Status.PENDING,
-        ).update(status=Event.Status.SENDING)
-        if not updated:
-            raise DeliveryAlreadyStarted
-
-        check_delivery_limits(initiated_by)
-        event.status = Event.Status.SENDING
-        return DeliveryAttempt.objects.create(event=event, initiated_by=initiated_by)
+        return _reserve_delivery(event, initiated_by=initiated_by)
 
 
-def deliver_event(event_id, initiated_by=None):
-    attempt = _start_delivery(event_id, initiated_by=initiated_by)
+def _send_and_finish_delivery(attempt):
+    if connection.in_atomic_block:
+        raise RuntimeError('O envio HTTP deve ocorrer fora de uma transação.')
     event = attempt.event
     data = {
         'id': str(event.pk),
@@ -66,3 +73,8 @@ def deliver_event(event_id, initiated_by=None):
         event.save(update_fields=['status'])
 
     return attempt
+
+
+def deliver_event(event_id, initiated_by=None):
+    attempt = _start_delivery(event_id, initiated_by=initiated_by)
+    return _send_and_finish_delivery(attempt)
