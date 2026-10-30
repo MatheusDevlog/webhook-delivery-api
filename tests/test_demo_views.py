@@ -1,4 +1,5 @@
 import json
+from html.parser import HTMLParser
 from unittest.mock import Mock
 from uuid import UUID, uuid4
 
@@ -14,6 +15,29 @@ from webhooks.models import DeliveryAttempt, Event, WebhookEndpoint
 
 
 pytestmark = pytest.mark.django_db(transaction=True)
+
+
+class DemoPage(HTMLParser):
+    def __init__(self, html):
+        super().__init__()
+        self.tags = []
+        self.config = ''
+        self.in_config = False
+        self.feed(html)
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        self.tags.append((tag, attrs))
+        if tag == 'script' and attrs.get('id') == 'demo-config':
+            self.in_config = True
+
+    def handle_endtag(self, tag):
+        if tag == 'script':
+            self.in_config = False
+
+    def handle_data(self, data):
+        if self.in_config:
+            self.config += data
 
 
 @pytest.fixture(autouse=True)
@@ -81,10 +105,11 @@ def test_home_prepares_visitor_and_csrf_without_database_writes(django_assert_nu
         response = browser.get(reverse('demo-home'), secure=True)
 
     assert response.status_code == 200
-    assert response.json()['enabled'] is True
-    assert response.json()['payload'] == {'pedido_id': 123}
-    assert response.json()['limits'] == {'per_minute': 3, 'per_day': 4, 'global_per_day': 20}
-    assert response.json()['csrf_token']
+    assert response.headers['Content-Type'] == 'text/html; charset=utf-8'
+    assert response.context['demo']['enabled'] is True
+    assert response.context['demo']['payload'] == {'pedido_id': 123}
+    assert response.context['demo']['limits'] == {'per_minute': 3, 'per_day': 4, 'global_per_day': 20}
+    assert response.context['csrf_token']
     assert set(response.cookies) == {VISITOR_COOKIE_NAME, 'csrftoken'}
     assert response.cookies[VISITOR_COOKIE_NAME]['httponly']
     assert response.cookies[VISITOR_COOKIE_NAME]['secure']
@@ -100,7 +125,48 @@ def test_home_prepares_visitor_and_csrf_without_database_writes(django_assert_nu
 def test_home_shows_disabled_demo_without_starting_delivery(browser, settings, sender, name, value):
     setattr(settings, name, value)
 
-    assert browser.get(reverse('demo-home'), secure=True).json()['enabled'] is False
+    response = browser.get(reverse('demo-home'), secure=True)
+
+    assert response.context['demo']['enabled'] is False
+    assert 'Os envios estão indisponíveis' in response.content.decode()
+    assert_no_start(sender)
+
+
+@pytest.mark.parametrize('enabled', [True, False])
+def test_home_renders_controlled_example_and_prepares_safe_browser_controls(browser, settings, sender, enabled):
+    settings.WEBHOOK_DEMO_ENABLED = enabled
+    response = browser.get(reverse('demo-home'), secure=True)
+    html = response.content.decode()
+    page = DemoPage(html)
+
+    assert json.loads(page.config) == response.context['demo']
+    assert json.loads(page.config)['enabled'] is enabled
+    assert 'webhooks/demo.html' in [template.name for template in response.templates]
+    buttons = [attrs for tag, attrs in page.tags if tag == 'button']
+    assert {attrs.get('data-scenario') for attrs in buttons if 'data-scenario' in attrs} == {
+        'success', 'failure',
+    }
+    assert {attrs['id'] for attrs in buttons} == {'send-success', 'send-failure', 'consult-result'}
+    assert all(attrs['type'] == 'button' and 'disabled' in attrs for attrs in buttons)
+    csrf_inputs = [attrs for tag, attrs in page.tags if attrs.get('name') == 'csrfmiddlewaretoken']
+    assert len(csrf_inputs) == 1
+    assert csrf_inputs[0]['type'] == 'hidden' and len(csrf_inputs[0]['value']) == 64
+    assert any(tag == 'p' and attrs.get('role') == 'status' for tag, attrs in page.tags)
+    assert settings.WEBHOOK_DEMO_SUCCESS_ENDPOINT_ID not in html
+    assert settings.WEBHOOK_DEMO_FAILURE_ENDPOINT_ID not in html
+    assert all(tag != 'form' for tag, attrs in page.tags)
+    assert_no_start(sender)
+
+
+def test_head_home_preserves_protection_headers_without_body_or_delivery(browser, sender):
+    response = browser.head(reverse('demo-home'), secure=True)
+
+    assert response.status_code == 200
+    assert response.content == b''
+    assert response.headers['Content-Type'] == 'text/html; charset=utf-8'
+    assert response.headers['Cache-Control'] == 'no-store'
+    assert 'Cookie' in response.headers['Vary']
+    assert response.cookies[VISITOR_COOKIE_NAME]['httponly']
     assert_no_start(sender)
 
 

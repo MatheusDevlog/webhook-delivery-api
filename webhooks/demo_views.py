@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from django.conf import settings
 from django.http import Http404, JsonResponse
-from django.middleware.csrf import get_token
+from django.shortcuts import render
 from django.utils.cache import patch_vary_headers
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST, require_safe
@@ -42,11 +42,12 @@ def demo_home(request):
         and settings.WEBHOOK_DEMO_SUCCESS_ENDPOINT_ID
         and settings.WEBHOOK_DEMO_FAILURE_ENDPOINT_ID
     )
-    response = _json_response({
+    demo = {
         'enabled': bool(enabled), 'event_type': 'pedido.pago', 'payload': {'pedido_id': 123},
         'scenarios': {'success': 'Sucesso', 'failure': 'Falha controlada'},
-        'limits': limits, 'csrf_token': get_token(request),
-    })
+        'limits': limits,
+    }
+    response = render(request, 'webhooks/demo.html', {'demo': demo})
     return prepare_visitor_response(request, response)
 
 

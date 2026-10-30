@@ -1,0 +1,71 @@
+{% load static %}
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Demonstração de entrega de webhooks por HTTPS, com eventos fictícios e consulta do resultado.">
+  <title>Webhook Delivery Service — Demonstração</title>
+  <link rel="stylesheet" href="{% static 'webhooks/demo.css' %}">
+</head>
+<body>
+  <a class="skip-link" href="#conteudo">Ir para o conteúdo</a>
+  <header class="site-header">
+    <a class="brand" href="{% url 'demo-home' %}"><span aria-hidden="true">↗</span> Webhook Delivery Service</a>
+    <a href="https://github.com/MatheusDevlog/webhook-delivery-api">Código no GitHub ↗</a>
+  </header>
+  <main id="conteudo">
+    <header class="intro">
+      <p class="eyebrow">Demonstração de backend</p>
+      <h1>Um evento.<br>Uma entrega. Um resultado.</h1>
+      <p>Uma loja confirmou o pagamento do pedido <strong>123</strong>. Agora, outro sistema precisa receber essa informação. Este serviço leva o aviso e registra o que aconteceu.</p>
+    </header>
+    <ol class="flow" aria-label="Caminho do evento">
+      <li><span>01</span><div><strong>Evento</strong><small>O pedido foi pago</small></div></li>
+      <li><span>02</span><div><strong>Entrega HTTPS</strong><small>O serviço tenta enviar o aviso</small></div></li>
+      <li><span>03</span><div><strong>Resultado</strong><small>A tentativa fica registrada</small></div></li>
+    </ol>
+    <div class="workspace">
+      <section class="card" aria-labelledby="test-title">
+        <p class="eyebrow">01 / Experimente</p>
+        <h2 id="test-title">Teste uma entrega</h2>
+        <p>Cada teste cria um evento fictício e faz uma tentativa de envio a um receptor controlado deste projeto.</p>
+        <pre aria-label="Dados fictícios do evento">{
+  "event_type": "{{ demo.event_type }}",
+  "payload": { "pedido_id": {{ demo.payload.pedido_id }} }
+}</pre>
+        {% csrf_token %}
+        <div class="actions">
+          <button id="send-success" type="button" data-scenario="success" disabled>Testar sucesso <span aria-hidden="true">↗</span></button>
+          <button id="send-failure" class="secondary" type="button" data-scenario="failure" disabled>Testar falha</button>
+        </div>
+        <p class="note">No sucesso, o receptor responde HTTP 200. Na falha controlada, responde HTTP 500. Os dois resultados devem ser registrados.</p>
+        <p id="availability" class="availability">{% if demo.enabled %}Escolha um cenário. Abrir esta página não inicia um envio.{% else %}Os envios estão indisponíveis no momento. Você ainda pode conhecer o fluxo e os dados do exemplo.{% endif %}</p>
+        <noscript><p class="availability">Ative o JavaScript no navegador para usar os botões da demonstração.</p></noscript>
+      </section>
+      <section id="result-panel" class="card result-card" aria-labelledby="result-title" aria-busy="false">
+        <div class="section-heading"><p class="eyebrow">02 / Acompanhe</p><span id="result-status" class="badge">Em espera</span></div>
+        <h2 id="result-title">Resultado da tentativa</h2>
+        <p id="result-message" role="status" aria-live="polite">O resultado aparecerá aqui depois do seu teste.</p>
+        <div id="result-data" hidden>
+          <dl>
+            <dt>Evento</dt><dd id="result-event-id"></dd>
+            <dt>Resposta do receptor</dt><dd id="result-http-status"></dd>
+            <dt>Erro registrado</dt><dd id="result-error"></dd>
+          </dl>
+          <details><summary>Ver resposta da API</summary><pre id="result-json"></pre></details>
+        </div>
+        <button id="consult-result" class="secondary" type="button" disabled>Consultar resultado</button>
+        <p class="note">Consultar busca o registro salvo; não faz outro envio. O resultado fica vinculado a este navegador por um cookie temporário, válido por até 24 horas.</p>
+      </section>
+    </div>
+    <aside class="limits" aria-label="Limites da demonstração">
+      <strong>Demonstração com limites</strong>
+      <p>Por navegador: até {{ demo.limits.per_minute }} envios em 60 segundos e {{ demo.limits.per_day }} em 24 horas. Limite compartilhado: {{ demo.limits.global_per_day }} envios em 24 horas.</p>
+      <p>Somente dados fictícios e destinos controlados. Não há reenvio automático.</p>
+    </aside>
+  </main>
+  <footer><span>Python · Django · PostgreSQL</span><a href="{% url 'health' %}">Consultar saúde da aplicação ↗</a></footer>
+  {{ demo|json_script:'demo-config' }}
+</body>
+</html>
