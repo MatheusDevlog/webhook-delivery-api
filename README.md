@@ -8,9 +8,9 @@ Exemplo: uma loja registra `pedido.pago` com o ID de um pedido, solicita o envio
 
 **Stack:** Python 3.14, Django 5.2, DRF, PostgreSQL 17, Docker Compose e pytest. Uma aplicação Django, com execução síncrona e uma tentativa por evento.
 
-**Em desenvolvimento:** o fluxo HTTPS foi verificado manualmente com receptores controlados neste projeto e resultados salvos no Neon. A interface para visitantes ainda está pendente. Envios e receptores de demonstração ficam desabilitados por padrão.
+**Em desenvolvimento:** a interface para visitantes está implementada; sua ativação e verificação na hospedagem estão pendentes. O fluxo do operador já foi verificado por HTTPS com resultados salvos no Neon. Envios e receptores de demonstração ficam desabilitados por padrão.
 
-[Saúde da base publicada](https://webhook-delivery-api.vercel.app/api/saude/) — confirma que a aplicação responde; não verifica banco ou entrega de webhooks. Ainda não há página inicial em `/`.
+[Saúde da base publicada](https://webhook-delivery-api.vercel.app/api/saude/) — confirma que a aplicação responde; não verifica banco ou entrega de webhooks.
 
 ## Executar localmente
 
@@ -35,7 +35,7 @@ docker compose exec api python manage.py migrate
 docker compose exec api python manage.py createsuperuser
 ```
 
-Acesse a [saúde local](http://127.0.0.1:8000/api/saude/) e o [admin local](http://127.0.0.1:8000/admin/) com o usuário criado. O Compose inicia a API e o PostgreSQL; não é necessário ativar uma `.venv` nesse fluxo.
+Acesse a [página inicial](http://127.0.0.1:8000/), a [saúde local](http://127.0.0.1:8000/api/saude/) e o [admin local](http://127.0.0.1:8000/admin/). Somente o admin exige o usuário criado. O Compose inicia API e PostgreSQL; não é necessário ativar uma `.venv` nesse fluxo.
 
 Após alterar código ou `.env`, repita `docker compose up -d --build --wait --wait-timeout 60`; o código fica copiado na imagem. `docker compose down` para os containers e preserva o volume do banco. Alterar a senha no `.env` não altera a senha de um banco já inicializado.
 
@@ -61,6 +61,21 @@ python manage.py runserver
 Se o banco já foi preparado pelo Docker, reaproveite as migrations e o usuário existentes. O Django lê as variáveis do ambiente; não carrega `.env` automaticamente. Carregue apenas seu próprio arquivo.
 
 </details>
+
+## Demonstração no navegador
+
+Em `/`, escolha **Testar sucesso** ou **Testar falha**. Cada clique aceito cria um evento `pedido.pago` com `{"pedido_id": "PEDIDO-001"}`, solicita uma tentativa síncrona e mostra seu resultado. **Consultar resultado** busca o registro salvo, sem outro envio. Abrir a página não inicia chamadas de entrega.
+
+- `POST /demonstracao/enviar/`: aceita somente `{"scenario": "success"}` ou `{"scenario": "failure"}`, como JSON de até 1 KiB; excesso retorna `413`. Retorna `200` com a tentativa concluída, inclusive quando o receptor respondeu `500`.
+- `GET /demonstracao/eventos/<uuid>/`: consulta a tentativa pelo ID do evento e pelo cookie do visitante; sem esse vínculo, retorna `404`.
+
+Não exige login. O navegador recebe um cookie assinado, HttpOnly, com validade de 24 horas; POST exige CSRF mesmo sem autenticação. A aba lembra o último ID e avisa quando não há confirmação do envio. Não há reenvio automático. Apagar o cookie pode renovar o limite do visitante; o orçamento global continua valendo.
+
+Para habilitar, o operador deve:
+
+1. Conferir migrations, cotas gratuitas e configurar proteção contra abuso na hospedagem antes de expor envios ao público.
+2. Autorizar as duas URLs HTTPS públicas dos receptores em `WEBHOOK_ALLOWED_URLS`, cadastrar os destinos com tipo `pedido.pago` e preencher seus UUIDs em `WEBHOOK_DEMO_SUCCESS_ENDPOINT_ID` e `WEBHOOK_DEMO_FAILURE_ENDPOINT_ID`.
+3. Ativar `WEBHOOK_DEMO_ENABLED=True` e `WEBHOOK_DEMO_RECEIVER_ENABLED=True`, com orçamento global positivo em `WEBHOOK_MAX_DELIVERIES_PER_DAY`. O padrão por visitante é 3 envios em 60 segundos e 4 em 24 horas, configurados em `WEBHOOK_MAX_DELIVERIES_PER_MINUTE` e `WEBHOOK_DEMO_MAX_DELIVERIES_PER_DAY`. As opções padrão de [.env.example](.env.example) mantêm os envios desabilitados.
 
 ## Usar a API
 
@@ -115,18 +130,16 @@ A tentativa apresenta `id`, `event_id`, `event_status`, `started_at`, `finished_
 
 ## Receptores de demonstração
 
-Representam o sistema destinatário dentro da mesma aplicação Django:
+Representam o destinatário dentro da mesma aplicação Django. `WEBHOOK_DEMO_RECEIVER_ENABLED=True` habilita ambos, sem login ou CSRF; desativados retornam `404`.
 
 | Método | Rota | Resposta com envelope válido |
 | --- | --- | --- |
 | POST | `/demonstracao/receptor/sucesso/` | `200`, `status: received` |
 | POST | `/demonstracao/receptor/falha/` | `500` controlado, `status: rejected` |
 
-Desativados por padrão, retornam `404`. `WEBHOOK_DEMO_RECEIVER_ENABLED=True` habilita ambos, sem login ou CSRF. Essa opção não altera as permissões das operações de eventos e tentativas.
-
 Exigem envelope JSON UTF-8 com `id` UUID, `created_at` válido, `event_type: pedido.pago` e `payload: {"pedido_id": "PEDIDO-001"}`, sem campos extras. A resposta inclui `event_id`; o corpo é limitado a 17 KiB. Dados inválidos retornam `400`, outros métodos `405`, excesso de tamanho `413` e formato incompatível `415`.
 
-Os receptores não gravam dados nem fazem envios. Para uma entrega HTTPS, cadastre a URL pública exata em `WEBHOOK_ALLOWED_URLS` e no admin, prepare um orçamento positivo e siga o fluxo da API. A ativação dos receptores sozinha não libera envios. Chamadas pela internet consomem recursos da hospedagem.
+Os receptores não gravam dados nem fazem envios. Sua ativação não libera envios nem altera as permissões das rotas do operador. Chamadas pela internet consomem recursos da hospedagem.
 
 **Verificação real em Vercel/Neon:** dois eventos fictícios foram enviados por HTTPS aos receptores desta aplicação. O sucesso ficou `delivered`/HTTP `200`; a falha controlada ficou `failed`/HTTP `500`/`http_error`. Os resultados foram persistidos e consultados pela API com `200`. Os receptores foram desativados após a verificação.
 
@@ -136,7 +149,7 @@ Os receptores não gravam dados nem fazem envios. Para uma entrega HTTPS, cadast
 - **Proteção de saída:** revalidação de URL e DNS/IP, conexão ao IP validado e certificado TLS para o domínio original. IPs internos são bloqueados; sem redirecionamentos, proxy do ambiente ou encaminhamento de credenciais recebidas.
 - **Dados:** payload como objeto JSON de até 16 KiB; envelope enviado de até 17 KiB. Corpo e headers da resposta externa não são persistidos.
 - **Tempo:** TCP/TLS compartilham 3 s; escrita tem 5 s por operação; leitura tem prazo de 5 s e cota de 16 KiB. DNS não possui prazo total próprio na aplicação.
-- **Orçamento:** `WEBHOOK_MAX_DELIVERIES_PER_MINUTE=3` por operador; `WEBHOOK_MAX_DELIVERIES_PER_DAY=0` por padrão. Qualquer limite zero desabilita envio. Para habilitar, configure orçamento positivo após preparar o receptor; por exemplo, `20` inícios nas últimas 24 horas.
+- **Orçamento:** limite por minuto separado por operador ou visitante; visitantes têm também cota de 24 horas. `WEBHOOK_MAX_DELIVERIES_PER_DAY=0` desabilita envio por padrão; um valor positivo, como `20`, limita o total de inícios nas últimas 24 horas, somando todos os visitantes e operadores. Zero em uma cota aplicável bloqueia o envio.
 - **Concorrência:** o PostgreSQL coordena início único e reserva de orçamento. Tentativas iniciadas consomem cota mesmo quando falham; a chamada externa ocorre sem transação aberta.
 
 `DJANGO_ALLOWED_HOSTS` configura os domínios da nossa API; `WEBHOOK_ALLOWED_URLS` controla os receptores. Uma interrupção pode deixar `sending` e tentativa incompleta, que exige avaliação manual e não permite reenvio automático. Os limites de envio não substituem proteção contra DDoS.
@@ -150,7 +163,9 @@ docker compose exec api python manage.py check
 docker compose exec api python -m pytest -q
 ```
 
-A suíte cobre validações, permissões, CSRF, persistência, falhas, concorrência, cotas, retenção e os dois receptores. Usa PostgreSQL local em banco separado e transporte/DNS/TLS simulados; não comprova entrega real. Não execute os testes com a configuração do Neon.
+A suíte cobre validações, permissões, CSRF, persistência, falhas, concorrência, cotas, retenção, receptores e rotas da demonstração. Usa PostgreSQL local em banco separado e transporte/DNS/TLS simulados; não execute com a configuração do Neon.
+
+Com Node.js disponível na máquina, execute também `node tests/test_demo_ui.mjs`. Esses testes usam DOM e HTTP simulados em memória para verificar os botões, as mensagens e a consulta. Node não é necessário para executar a API. As suítes não substituem a verificação de entrega real nem a revisão visual no navegador.
 
 ## Retenção de dados
 
@@ -172,7 +187,7 @@ Configure em Production: chave Django própria, `DJANGO_DEBUG=False`, domínio e
 
 ## Fora do MVP
 
-Retry automático, assinatura HMAC, chave de idempotência, filas e processamento em segundo plano ficam para evolução. Cadastro de destinos, registro de eventos e solicitação de envio permanecem restritos ao operador.
+Retry automático, assinatura HMAC, chave de idempotência, filas e processamento em segundo plano ficam para evolução. Operações genéricas de cadastro e envio permanecem restritas ao operador; visitantes usam somente os dois cenários fixos da demonstração.
 
 ## Licença
 
