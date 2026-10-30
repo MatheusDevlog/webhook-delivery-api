@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from django.test import Client
+from django.templatetags.static import static
 from django.urls import reverse
 
 from webhooks.demo_access import VISITOR_COOKIE_NAME, get_visitor_id
@@ -165,6 +166,11 @@ def test_home_renders_controlled_example_and_prepares_safe_browser_controls(brow
     assert any(tag == 'p' and attrs.get('role') == 'status' for tag, attrs in page.tags)
     assert settings.WEBHOOK_DEMO_SUCCESS_ENDPOINT_ID not in html
     assert settings.WEBHOOK_DEMO_FAILURE_ENDPOINT_ID not in html
+    root = next(attrs for tag, attrs in page.tags if attrs.get('id') == 'conteudo')
+    assert root['data-send-url'] == reverse('demo-send')
+    assert root['data-detail-url'] == detail_url(UUID(int=0))
+    scripts = [attrs for tag, attrs in page.tags if tag == 'script' and 'src' in attrs]
+    assert scripts == [{'src': static('webhooks/demo.js'), 'defer': None}]
     assert all(tag != 'form' for tag, attrs in page.tags)
     assert_no_start(sender)
 

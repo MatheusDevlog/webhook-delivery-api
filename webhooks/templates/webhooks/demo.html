@@ -14,7 +14,7 @@
     <a class="brand" href="{% url 'demo-home' %}"><span aria-hidden="true">↗</span> Webhook Delivery Service</a>
     <a href="https://github.com/MatheusDevlog/webhook-delivery-api">Código no GitHub ↗</a>
   </header>
-  <main id="conteudo">
+  <main id="conteudo" data-send-url="{% url 'demo-send' %}" data-detail-url="{% url 'demo-detail' event_id='00000000-0000-0000-0000-000000000000' %}">
     <header class="intro">
       <p class="eyebrow">Demonstração de backend</p>
       <h1>Um evento.<br>Uma entrega. Um resultado.</h1>
@@ -67,5 +67,6 @@
   </main>
   <footer><span>Python · Django · PostgreSQL</span><a href="{% url 'health' %}">Consultar saúde da aplicação ↗</a></footer>
   {{ demo|json_script:'demo-config' }}
+  <script src="{% static 'webhooks/demo.js' %}" defer></script>
 </body>
 </html>
