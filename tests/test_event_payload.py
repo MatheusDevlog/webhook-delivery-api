@@ -8,7 +8,7 @@ from webhooks.validators import validate_event_payload
     'payload',
     [
         {},
-        {'pedido_id': 123},
+        {'pedido_id': 'PEDIDO-001'},
         {'itens': [{'sku': 'A', 'quantidade': 2}], 'pago': True, 'observacao': None},
         {'mensagem': 'Pagamento confirmado: ação concluída ✅'},
         {'texto': r'\u0000'},

@@ -24,7 +24,7 @@ def test_concurrent_starts_create_only_one_attempt(settings, monkeypatch, send_e
         url=settings.WEBHOOK_ALLOWED_URLS[0], event_type='pedido.pago',
     )
     event = Event.objects.create(
-        endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 123},
+        endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 'PEDIDO-001'},
     )
     ready = Barrier(2, timeout=10)
     full_clean = Event.full_clean

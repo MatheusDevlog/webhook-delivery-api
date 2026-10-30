@@ -21,7 +21,7 @@ def event_data(endpoint):
     return {
         'endpoint_id': str(endpoint.pk),
         'event_type': 'pedido.pago',
-        'payload': {'pedido_id': 123, 'mensagem': 'Pagamento confirmado ✅'},
+        'payload': {'pedido_id': 'PEDIDO-001', 'mensagem': 'Pagamento confirmado ✅'},
     }
 
 

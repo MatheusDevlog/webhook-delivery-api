@@ -30,7 +30,7 @@ def event(settings):
         url=settings.WEBHOOK_ALLOWED_URLS[0], event_type='pedido.pago',
     )
     return Event.objects.create(
-        endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 123},
+        endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 'PEDIDO-001'},
     )
 
 
@@ -174,7 +174,7 @@ def test_sends_event_envelope_after_persisting_start_outside_transaction(event, 
         'id': str(event.pk),
         'event_type': 'pedido.pago',
         'created_at': event.created_at.isoformat(),
-        'payload': {'pedido_id': 123},
+        'payload': {'pedido_id': 'PEDIDO-001'},
     }
 
     def send(url, data):

@@ -67,7 +67,7 @@ def test_demo_creates_fixed_event_and_records_transport_result(demo, sender, sce
         assert url == demo[scenario].url
         assert data == {
             'id': str(event.pk), 'event_type': 'pedido.pago',
-            'created_at': event.created_at.isoformat(), 'payload': {'pedido_id': 123},
+            'created_at': event.created_at.isoformat(), 'payload': {'pedido_id': 'PEDIDO-001'},
         }
         if isinstance(result, Exception):
             raise result
@@ -81,7 +81,7 @@ def test_demo_creates_fixed_event_and_records_transport_result(demo, sender, sce
     assert isinstance(event.pk, UUID)
     assert event.status == state
     assert event.endpoint_id == demo[scenario].pk
-    assert event.payload == {'pedido_id': 123}
+    assert event.payload == {'pedido_id': 'PEDIDO-001'}
     assert attempt.visitor_id == visitor_id
     assert attempt.initiated_by_id is None
     assert attempt.finished_at >= attempt.started_at

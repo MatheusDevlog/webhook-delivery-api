@@ -23,6 +23,8 @@ class DemoPage(HTMLParser):
         self.tags = []
         self.config = ''
         self.in_config = False
+        self.example = ''
+        self.in_example = False
         self.feed(html)
 
     def handle_starttag(self, tag, attrs):
@@ -30,14 +32,20 @@ class DemoPage(HTMLParser):
         self.tags.append((tag, attrs))
         if tag == 'script' and attrs.get('id') == 'demo-config':
             self.in_config = True
+        if tag == 'pre' and attrs.get('aria-label') == 'Dados fictícios do evento':
+            self.in_example = True
 
     def handle_endtag(self, tag):
         if tag == 'script':
             self.in_config = False
+        if tag == 'pre':
+            self.in_example = False
 
     def handle_data(self, data):
         if self.in_config:
             self.config += data
+        if self.in_example:
+            self.example += data
 
 
 @pytest.fixture(autouse=True)
@@ -107,7 +115,7 @@ def test_home_prepares_visitor_and_csrf_without_database_writes(django_assert_nu
     assert response.status_code == 200
     assert response.headers['Content-Type'] == 'text/html; charset=utf-8'
     assert response.context['demo']['enabled'] is True
-    assert response.context['demo']['payload'] == {'pedido_id': 123}
+    assert response.context['demo']['payload'] == {'pedido_id': 'PEDIDO-001'}
     assert response.context['demo']['limits'] == {'per_minute': 3, 'per_day': 4, 'global_per_day': 20}
     assert response.context['csrf_token']
     assert set(response.cookies) == {VISITOR_COOKIE_NAME, 'csrftoken'}
@@ -141,6 +149,9 @@ def test_home_renders_controlled_example_and_prepares_safe_browser_controls(brow
 
     assert json.loads(page.config) == response.context['demo']
     assert json.loads(page.config)['enabled'] is enabled
+    assert json.loads(page.example) == {
+        'event_type': 'pedido.pago', 'payload': {'pedido_id': 'PEDIDO-001'},
+    }
     assert 'webhooks/demo.html' in [template.name for template in response.templates]
     buttons = [attrs for tag, attrs in page.tags if tag == 'button']
     assert {attrs.get('data-scenario') for attrs in buttons if 'data-scenario' in attrs} == {

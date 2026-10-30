@@ -56,10 +56,10 @@ class DemoEnvelopeSerializer(serializers.Serializer):
         if (
             not isinstance(value, dict)
             or set(value) != {'pedido_id'}
-            or type(value['pedido_id']) is not int
-            or value['pedido_id'] != 123
+            or type(value['pedido_id']) is not str
+            or value['pedido_id'] != 'PEDIDO-001'
         ):
-            raise serializers.ValidationError('Use somente o exemplo fictício: pedido_id igual a 123.')
+            raise serializers.ValidationError('Use somente o exemplo fictício: pedido_id igual a PEDIDO-001.')
         return value
 
 

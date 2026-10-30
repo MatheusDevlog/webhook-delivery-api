@@ -20,7 +20,7 @@ def event(settings):
     endpoint = WebhookEndpoint.objects.create(
         url=settings.WEBHOOK_ALLOWED_URLS[0], event_type='pedido.pago',
     )
-    event = Event(endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 123})
+    event = Event(endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 'PEDIDO-001'})
     event.full_clean()
     event.save()
     return event

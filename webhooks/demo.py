@@ -50,7 +50,7 @@ def deliver_demo(scenario, visitor_id, *, event_id=None):
     with transaction.atomic(durable=True):
         endpoint = _get_demo_endpoint(scenario)
         event = Event(
-            endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 123},
+            endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 'PEDIDO-001'},
         )
         if event_id is not None:
             event.id = event_id

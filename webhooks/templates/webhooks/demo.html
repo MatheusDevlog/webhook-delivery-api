@@ -18,7 +18,7 @@
     <header class="intro">
       <p class="eyebrow">Demonstração de backend</p>
       <h1>Um evento.<br>Uma entrega. Um resultado.</h1>
-      <p>Uma loja confirmou o pagamento do pedido <strong>123</strong>. Agora, outro sistema precisa receber essa informação. Este serviço leva o aviso e registra o que aconteceu.</p>
+      <p>Quando um pagamento é confirmado, a loja precisa notificar outro sistema. Este serviço envia o evento por HTTPS e registra o resultado da tentativa de entrega.</p>
     </header>
     <ol class="flow" aria-label="Caminho do evento">
       <li><span>01</span><div><strong>Evento</strong><small>O pedido foi pago</small></div></li>
@@ -32,7 +32,7 @@
         <p>Cada teste cria um evento fictício e faz uma tentativa de envio a um receptor controlado deste projeto.</p>
         <pre aria-label="Dados fictícios do evento">{
   "event_type": "{{ demo.event_type }}",
-  "payload": { "pedido_id": {{ demo.payload.pedido_id }} }
+  "payload": { "pedido_id": "{{ demo.payload.pedido_id }}" }
 }</pre>
         {% csrf_token %}
         <div class="actions">

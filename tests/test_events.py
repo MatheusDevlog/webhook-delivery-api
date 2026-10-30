@@ -19,7 +19,7 @@ def endpoint(settings):
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize('payload', [{}, {'pedido_id': 123, 'mensagem': 'Pagamento ✅'}])
+@pytest.mark.parametrize('payload', [{}, {'pedido_id': 'PEDIDO-001', 'mensagem': 'Pagamento ✅'}])
 def test_persists_pending_event_with_destination_and_payload(endpoint, payload):
     event = Event(endpoint=endpoint, event_type='pedido.pago', payload=payload)
     event.full_clean()
@@ -38,7 +38,7 @@ def test_persists_pending_event_with_destination_and_payload(endpoint, payload):
 @pytest.mark.django_db
 @pytest.mark.parametrize('field', ['endpoint', 'event_type', 'payload'])
 def test_rejects_missing_event_data(endpoint, field):
-    values = {'endpoint': endpoint, 'event_type': 'pedido.pago', 'payload': {'pedido_id': 123}}
+    values = {'endpoint': endpoint, 'event_type': 'pedido.pago', 'payload': {'pedido_id': 'PEDIDO-001'}}
     values.pop(field)
 
     with pytest.raises(ValidationError) as error:
@@ -51,7 +51,7 @@ def test_rejects_missing_event_data(endpoint, field):
 @pytest.mark.django_db
 @pytest.mark.parametrize('event_type', ['pedido.cancelado', 'Pedido.pago', 'pedido'])
 def test_rejects_incompatible_or_invalid_event_type(endpoint, event_type):
-    event = Event(endpoint=endpoint, event_type=event_type, payload={'pedido_id': 123})
+    event = Event(endpoint=endpoint, event_type=event_type, payload={'pedido_id': 'PEDIDO-001'})
 
     with pytest.raises(ValidationError) as error:
         event.full_clean()
@@ -151,7 +151,7 @@ def test_rejects_unsupported_event_status_in_validation_and_database(endpoint):
 @pytest.mark.parametrize('status', ['sending', 'delivered', 'failed'])
 def test_persists_supported_delivery_statuses(endpoint, status):
     event = Event(
-        endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 123},
+        endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 'PEDIDO-001'},
         status=status,
     )
     event.full_clean()
@@ -160,15 +160,15 @@ def test_persists_supported_delivery_statuses(endpoint, status):
 
     assert event.status == status
     assert event.endpoint_id == endpoint.pk
-    assert event.payload == {'pedido_id': 123}
+    assert event.payload == {'pedido_id': 'PEDIDO-001'}
 
 
 @pytest.mark.django_db
 def test_repeated_registration_creates_distinct_events(endpoint):
-    first = Event(endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 123})
+    first = Event(endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 'PEDIDO-001'})
     first.full_clean()
     first.save()
-    second = Event(endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 123})
+    second = Event(endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 'PEDIDO-001'})
     second.full_clean()
     second.save()
 

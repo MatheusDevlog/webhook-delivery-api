@@ -102,7 +102,7 @@ def create_attempt(db):
 
     def create(visitor_id, initiated_by=None):
         event = Event.objects.create(
-            endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 123},
+            endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 'PEDIDO-001'},
         )
         return DeliveryAttempt.objects.create(
             event=event, visitor_id=visitor_id, initiated_by=initiated_by,

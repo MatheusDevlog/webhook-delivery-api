@@ -185,7 +185,7 @@ def test_rejects_private_ip_even_if_resolved_destination_was_constructed_directl
 def test_returns_http_result_using_the_real_parser_with_simulated_network(http_receiver, status):
     http_receiver(f'HTTP/1.1 {status} Result\r\nContent-Length: 0\r\n\r\n'.encode())
 
-    result = delivery.post_json('https://receiver.example/webhook', {'pedido_id': 123})
+    result = delivery.post_json('https://receiver.example/webhook', {'pedido_id': 'PEDIDO-001'})
 
     assert result == delivery.DeliveryResult(status, '' if status < 300 else 'http_error')
 
@@ -195,7 +195,7 @@ def test_posts_utf8_json_with_fixed_headers_and_without_another_dns_lookup(
 ):
     context, raw, tls, factory, resolver = network
     monkeypatch.setenv('HTTPS_PROXY', 'http://127.0.0.1:9999')
-    data = {'pedido_id': 123, 'mensagem': 'Pagamento ✅'}
+    data = {'pedido_id': 'PEDIDO-001', 'mensagem': 'Pagamento ✅'}
 
     result = delivery.post_json('https://receiver.example/webhook', data)
 

@@ -83,7 +83,7 @@ As permissões são por modelo: um operador autorizado pode consultar registros 
 {
   "endpoint_id": "11111111-1111-4111-8111-111111111111",
   "event_type": "pedido.pago",
-  "payload": {"pedido_id": 123}
+  "payload": {"pedido_id": "PEDIDO-001"}
 }
 ```
 
@@ -124,7 +124,7 @@ Representam o sistema destinatário dentro da mesma aplicação Django:
 
 Desativados por padrão, retornam `404`. `WEBHOOK_DEMO_RECEIVER_ENABLED=True` habilita ambos, sem login ou CSRF. Essa opção não altera as permissões das operações de eventos e tentativas.
 
-Exigem envelope JSON UTF-8 com `id` UUID, `created_at` válido, `event_type: pedido.pago` e `payload: {"pedido_id": 123}`, sem campos extras. A resposta inclui `event_id`; o corpo é limitado a 17 KiB. Dados inválidos retornam `400`, outros métodos `405`, excesso de tamanho `413` e formato incompatível `415`.
+Exigem envelope JSON UTF-8 com `id` UUID, `created_at` válido, `event_type: pedido.pago` e `payload: {"pedido_id": "PEDIDO-001"}`, sem campos extras. A resposta inclui `event_id`; o corpo é limitado a 17 KiB. Dados inválidos retornam `400`, outros métodos `405`, excesso de tamanho `413` e formato incompatível `415`.
 
 Os receptores não gravam dados nem fazem envios. Para uma entrega HTTPS, cadastre a URL pública exata em `WEBHOOK_ALLOWED_URLS` e no admin, prepare um orçamento positivo e siga o fluxo da API. A ativação dos receptores sozinha não libera envios. Chamadas pela internet consomem recursos da hospedagem.
 

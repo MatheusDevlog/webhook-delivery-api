@@ -43,7 +43,7 @@ def demo_home(request):
         and settings.WEBHOOK_DEMO_FAILURE_ENDPOINT_ID
     )
     demo = {
-        'enabled': bool(enabled), 'event_type': 'pedido.pago', 'payload': {'pedido_id': 123},
+        'enabled': bool(enabled), 'event_type': 'pedido.pago', 'payload': {'pedido_id': 'PEDIDO-001'},
         'scenarios': {'success': 'Sucesso', 'failure': 'Falha controlada'},
         'limits': limits,
     }

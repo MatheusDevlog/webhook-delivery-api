@@ -28,7 +28,7 @@ def event(settings):
         url=settings.WEBHOOK_ALLOWED_URLS[0], event_type='pedido.pago',
     )
     return Event.objects.create(
-        endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 123},
+        endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 'PEDIDO-001'},
     )
 
 
