@@ -8,7 +8,13 @@ from django.db import IntegrityError, connection, transaction
 
 from webhooks.delivery import MAX_REQUEST_BYTES, DeliveryResult
 from webhooks.models import DeliveryAttempt, Event, WebhookEndpoint
-from webhooks.services import DeliveryAlreadyStarted, _start_delivery, deliver_event
+from webhooks.services import (
+    DeliveryAlreadyStarted,
+    _reserve_delivery,
+    _send_and_finish_delivery,
+    _start_delivery,
+    deliver_event,
+)
 from webhooks.validators import MAX_EVENT_PAYLOAD_BYTES
 
 
@@ -24,7 +30,7 @@ def event(settings):
         url=settings.WEBHOOK_ALLOWED_URLS[0], event_type='pedido.pago',
     )
     return Event.objects.create(
-        endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 123},
+        endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 'PEDIDO-001'},
     )
 
 
@@ -168,7 +174,7 @@ def test_sends_event_envelope_after_persisting_start_outside_transaction(event, 
         'id': str(event.pk),
         'event_type': 'pedido.pago',
         'created_at': event.created_at.isoformat(),
-        'payload': {'pedido_id': 123},
+        'payload': {'pedido_id': 'PEDIDO-001'},
     }
 
     def send(url, data):
@@ -313,3 +319,43 @@ def test_policy_change_after_http_does_not_erase_observed_result(event, sender, 
     assert attempt.http_status == 204
     assert attempt.finished_at is not None
     assert event.status == Event.Status.DELIVERED
+
+
+def test_reservation_requires_transaction_before_changing_event(event, sender):
+    with pytest.raises(RuntimeError):
+        _reserve_delivery(event)
+
+    event.refresh_from_db()
+    assert event.status == Event.Status.PENDING
+    assert not DeliveryAttempt.objects.exists()
+    sender.assert_not_called()
+
+
+def test_creation_and_reservation_can_roll_back_together(event, sender):
+    with pytest.raises(IntegrityError), transaction.atomic(durable=True):
+        created = Event.objects.create(
+            endpoint=event.endpoint, event_type=event.event_type, payload=event.payload,
+        )
+        attempt = _reserve_delivery(created)
+        assert attempt.event_id == created.pk
+        assert created.status == Event.Status.SENDING
+        raise IntegrityError('Falha simulada após reservar a entrega.')
+
+    assert Event.objects.filter(pk=event.pk).exists()
+    assert not Event.objects.filter(pk=created.pk).exists()
+    assert not DeliveryAttempt.objects.exists()
+    sender.assert_not_called()
+
+
+def test_transport_phase_refuses_open_transaction(event, sender):
+    attempt = _start_delivery(event.pk)
+    with transaction.atomic():
+        with pytest.raises(RuntimeError):
+            _send_and_finish_delivery(attempt)
+
+    attempt.refresh_from_db()
+    event.refresh_from_db()
+    assert attempt.finished_at is None
+    assert attempt.http_status is None
+    assert event.status == Event.Status.SENDING
+    sender.assert_not_called()

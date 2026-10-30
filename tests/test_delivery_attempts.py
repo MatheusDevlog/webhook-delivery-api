@@ -20,7 +20,7 @@ def event(settings):
     endpoint = WebhookEndpoint.objects.create(
         url=settings.WEBHOOK_ALLOWED_URLS[0], event_type='pedido.pago',
     )
-    event = Event(endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 123})
+    event = Event(endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 'PEDIDO-001'})
     event.full_clean()
     event.save()
     return event
@@ -162,6 +162,7 @@ def test_attempt_can_remain_without_operator_for_existing_records(event):
     attempt.refresh_from_db()
 
     assert attempt.initiated_by_id is None
+    assert attempt.visitor_id is None
     assert attempt.event_id == event.pk
 
 
@@ -173,6 +174,7 @@ def test_persists_operator_who_initiated_attempt(event, django_user_model):
     attempt.refresh_from_db()
 
     assert attempt.initiated_by_id == user.pk
+    assert attempt.visitor_id is None
     assert user.webhook_delivery_attempts.get().pk == attempt.pk
 
 
@@ -203,5 +205,50 @@ def test_attempt_operator_must_reference_existing_user(event, django_user_model)
     with pytest.raises(IntegrityError), transaction.atomic():
         DeliveryAttempt.objects.create(**values)
         connection.check_constraints()
+
+    assert not DeliveryAttempt.objects.exists()
+
+
+@pytest.mark.parametrize('as_text', [False, True])
+def test_persists_visitor_identifier(event, as_text):
+    visitor_id = uuid.uuid4()
+    attempt = DeliveryAttempt(
+        event=event, visitor_id=str(visitor_id) if as_text else visitor_id,
+    )
+    attempt.full_clean()
+    attempt.save()
+    attempt.refresh_from_db()
+
+    assert attempt.visitor_id == visitor_id
+    assert attempt.initiated_by_id is None
+    assert attempt.finished_at is None
+
+
+def test_groups_multiple_attempts_by_visitor_without_mixing_other_visitors(event):
+    visitor_id = uuid.uuid4()
+    other_visitor_id = uuid.uuid4()
+    first = DeliveryAttempt.objects.create(event=event, visitor_id=visitor_id)
+    other_events = [
+        Event.objects.create(
+            endpoint=event.endpoint, event_type=event.event_type, payload=event.payload,
+        )
+        for _ in range(2)
+    ]
+    second = DeliveryAttempt.objects.create(event=other_events[0], visitor_id=visitor_id)
+    other = DeliveryAttempt.objects.create(event=other_events[1], visitor_id=other_visitor_id)
+
+    assert set(
+        DeliveryAttempt.objects.filter(visitor_id=visitor_id).values_list('pk', flat=True)
+    ) == {first.pk, second.pk}
+    assert DeliveryAttempt.objects.get(visitor_id=other_visitor_id).pk == other.pk
+
+
+def test_rejects_invalid_visitor_identifier_without_persisting_attempt(event):
+    with pytest.raises(ValidationError) as error:
+        DeliveryAttempt(event=event, visitor_id='not-a-uuid').full_clean()
+
+    assert 'visitor_id' in error.value.message_dict
+    with pytest.raises(ValidationError), transaction.atomic():
+        DeliveryAttempt.objects.create(event=event, visitor_id='not-a-uuid')
 
     assert not DeliveryAttempt.objects.exists()

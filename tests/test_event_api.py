@@ -25,7 +25,7 @@ def event_data(endpoint):
     return {
         'endpoint_id': str(endpoint.pk),
         'event_type': 'pedido.pago',
-        'payload': {'pedido_id': 123, 'mensagem': 'Pagamento confirmado ✅'},
+        'payload': {'pedido_id': 'PEDIDO-001', 'mensagem': 'Pagamento confirmado ✅'},
     }
 
 
@@ -49,7 +49,7 @@ def operator_client(client, operator):
 @pytest.fixture
 def event(endpoint):
     return Event.objects.create(
-        endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 123},
+        endpoint=endpoint, event_type='pedido.pago', payload={'pedido_id': 'PEDIDO-001'},
     )
 
 
@@ -214,7 +214,7 @@ def test_detail_does_not_allow_mutations(operator_client, operator, event, metho
 
     assert response.status_code == 405
     event.refresh_from_db()
-    assert event.payload == {'pedido_id': 123}
+    assert event.payload == {'pedido_id': 'PEDIDO-001'}
     assert event.status == 'pending'
 
 

@@ -30,7 +30,7 @@ def envelope():
         'id': '11111111-1111-4111-8111-111111111111',
         'event_type': 'pedido.pago',
         'created_at': '2026-10-29T12:00:00Z',
-        'payload': {'pedido_id': 123},
+        'payload': {'pedido_id': 'PEDIDO-001'},
     }
 
 
@@ -101,9 +101,9 @@ def test_receiver_requires_every_envelope_field(client, envelope, field, receive
 
 @pytest.mark.parametrize(('field', 'value'), [
     ('id', 'invalid'), ('created_at', 'yesterday'), ('event_type', 'cliente.cadastrado'),
-    ('payload', {}), ('payload', []), ('payload', None), ('payload', {'pedido_id': 999}),
-    ('payload', {'pedido_id': '123'}), ('payload', {'pedido_id': 123.0}),
-    ('payload', {'pedido_id': 123, 'email': 'private@example.com'}),
+    ('payload', {}), ('payload', []), ('payload', None), ('payload', {'pedido_id': 'PEDIDO-999'}),
+    ('payload', {'pedido_id': 1}), ('payload', {'pedido_id': 1.0}),
+    ('payload', {'pedido_id': 'PEDIDO-001', 'email': 'private@example.com'}),
 ])
 def test_receiver_rejects_invalid_or_nonfictitious_values(client, envelope, field, value, receiver):
     envelope[field] = value

@@ -75,3 +75,17 @@ class DeliveryRequestSerializer(serializers.Serializer):
                 ],
             })
         return {}
+
+
+class DemoRequestSerializer(serializers.Serializer):
+    scenario = serializers.ChoiceField(
+        choices=['success', 'failure'],
+        error_messages={'invalid_choice': 'Escolha somente sucesso ou falha.'},
+    )
+
+    def to_internal_value(self, data):
+        if isinstance(data, Mapping) and set(data) - {'scenario'}:
+            raise serializers.ValidationError({
+                api_settings.NON_FIELD_ERRORS_KEY: ['Envie somente o campo scenario.'],
+            })
+        return super().to_internal_value(data)

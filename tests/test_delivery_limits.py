@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from unittest.mock import Mock
+from uuid import uuid4
 
 import pytest
 from django.core.exceptions import ImproperlyConfigured
@@ -22,6 +23,7 @@ def create_event(settings):
     settings.WEBHOOK_ALLOWED_URLS = ['https://receiver.example/webhook']
     settings.WEBHOOK_MAX_DELIVERIES_PER_MINUTE = 3
     settings.WEBHOOK_MAX_DELIVERIES_PER_DAY = 20
+    settings.WEBHOOK_DEMO_MAX_DELIVERIES_PER_DAY = 4
     endpoint = WebhookEndpoint.objects.create(
         url=settings.WEBHOOK_ALLOWED_URLS[0], event_type='pedido.pago',
     )
@@ -207,4 +209,178 @@ def test_busy_budget_has_bounded_wait_and_rolls_back_start(
     event.refresh_from_db()
     assert event.status == Event.Status.PENDING
     assert not DeliveryAttempt.objects.exists()
+    sender.assert_not_called()
+
+
+def test_visitor_minute_limit_preserves_event_and_allows_another_visitor(create_event, sender):
+    visitor_id = uuid4()
+    for _ in range(3):
+        _start_delivery(create_event().pk, visitor_id=visitor_id)
+    blocked = create_event()
+
+    with pytest.raises(DeliveryLimitError) as error:
+        _start_delivery(blocked.pk, visitor_id=visitor_id)
+
+    assert error.value.code == 'visitor_minute_limit'
+    assert 1 <= error.value.retry_after <= 60
+    blocked.refresh_from_db()
+    assert blocked.status == Event.Status.PENDING
+    assert not DeliveryAttempt.objects.filter(event=blocked).exists()
+    other = _start_delivery(create_event().pk, visitor_id=uuid4())
+    assert other.visitor_id != visitor_id
+    assert other.initiated_by_id is None
+    assert DeliveryAttempt.objects.filter(visitor_id=visitor_id).count() == 3
+    sender.assert_not_called()
+
+
+def test_visitor_daily_limit_is_separate_from_minute_limit(create_event, settings, sender):
+    settings.WEBHOOK_MAX_DELIVERIES_PER_MINUTE = 10
+    visitor_id = uuid4()
+    for _ in range(4):
+        _start_delivery(create_event().pk, visitor_id=visitor_id)
+    blocked = create_event()
+
+    with pytest.raises(DeliveryLimitError) as error:
+        _start_delivery(blocked.pk, visitor_id=visitor_id)
+
+    assert error.value.code == 'visitor_day_limit'
+    assert 1 <= error.value.retry_after <= 86400
+    blocked.refresh_from_db()
+    assert blocked.status == Event.Status.PENDING
+    assert not DeliveryAttempt.objects.filter(event=blocked).exists()
+    _start_delivery(create_event().pk, visitor_id=uuid4())
+    assert DeliveryAttempt.objects.count() == 5
+    sender.assert_not_called()
+
+
+def test_global_budget_is_shared_by_operators_and_visitors(create_event, operator, settings, sender):
+    settings.WEBHOOK_MAX_DELIVERIES_PER_DAY = 2
+    _start_delivery(create_event().pk, initiated_by=operator)
+    _start_delivery(create_event().pk, visitor_id=uuid4())
+    blocked = create_event()
+
+    with pytest.raises(DeliveryLimitError) as error:
+        _start_delivery(blocked.pk, visitor_id=uuid4())
+
+    assert error.value.code == 'global_limit'
+    blocked.refresh_from_db()
+    assert blocked.status == Event.Status.PENDING
+    assert DeliveryAttempt.objects.count() == 2
+    sender.assert_not_called()
+
+
+@pytest.mark.parametrize('result', [
+    DeliveryResult(500, 'http_error'), DeliveryResult(None, 'timeout'),
+])
+def test_failed_visitor_attempt_still_consumes_daily_quota(create_event, settings, sender, result):
+    settings.WEBHOOK_DEMO_MAX_DELIVERIES_PER_DAY = 1
+    visitor_id = uuid4()
+    sender.return_value = result
+    first = deliver_event(create_event().pk, visitor_id=visitor_id)
+    blocked = create_event()
+
+    with pytest.raises(DeliveryLimitError) as error:
+        deliver_event(blocked.pk, visitor_id=visitor_id)
+
+    assert error.value.code == 'visitor_day_limit'
+    assert first.visitor_id == visitor_id
+    assert first.error_code == result.error_code
+    blocked.refresh_from_db()
+    assert blocked.status == Event.Status.PENDING
+    assert DeliveryAttempt.objects.count() == 1
+    sender.assert_called_once()
+
+
+def test_zero_visitor_budget_does_not_disable_operator(create_event, operator, settings, sender):
+    settings.WEBHOOK_DEMO_MAX_DELIVERIES_PER_DAY = 0
+    blocked = create_event()
+
+    with pytest.raises(DeliveryLimitError) as error:
+        _start_delivery(blocked.pk, visitor_id=uuid4())
+
+    assert error.value.code == 'disabled'
+    blocked.refresh_from_db()
+    assert blocked.status == Event.Status.PENDING
+    attempt = _start_delivery(create_event().pk, initiated_by=operator)
+    assert attempt.initiated_by_id == operator.pk
+    assert attempt.visitor_id is None
+    assert DeliveryAttempt.objects.count() == 1
+    sender.assert_not_called()
+
+
+@pytest.mark.parametrize('value', [-1, True, '4', 2.5])
+def test_invalid_visitor_limit_does_not_start_delivery(create_event, settings, sender, value):
+    settings.WEBHOOK_DEMO_MAX_DELIVERIES_PER_DAY = value
+    event = create_event()
+
+    with pytest.raises(ImproperlyConfigured):
+        _start_delivery(event.pk, visitor_id=uuid4())
+
+    event.refresh_from_db()
+    assert event.status == Event.Status.PENDING
+    assert not DeliveryAttempt.objects.exists()
+    sender.assert_not_called()
+
+
+@pytest.mark.parametrize('identity', ['invalid_uuid', 'mixed_actors'])
+def test_invalid_visitor_identity_does_not_start_delivery(create_event, operator, sender, identity):
+    visitor_id = 'not-a-uuid' if identity == 'invalid_uuid' else uuid4()
+    actor = operator if identity == 'mixed_actors' else None
+    event = create_event()
+
+    with pytest.raises(ValueError):
+        _start_delivery(event.pk, initiated_by=actor, visitor_id=visitor_id)
+
+    event.refresh_from_db()
+    assert event.status == Event.Status.PENDING
+    assert not DeliveryAttempt.objects.exists()
+    sender.assert_not_called()
+
+
+@pytest.mark.parametrize(('window', 'age', 'blocked'), [
+    ('minute', 59, True), ('minute', 60, False),
+    ('day', 86399, True), ('day', 86400, False),
+])
+def test_visitor_window_boundary_releases_capacity(
+    create_event, settings, monkeypatch, window, age, blocked,
+):
+    settings.WEBHOOK_MAX_DELIVERIES_PER_MINUTE = 1
+    settings.WEBHOOK_DEMO_MAX_DELIVERIES_PER_DAY = 1 if window == 'day' else 4
+    visitor_id = uuid4()
+    now = timezone.now()
+    monkeypatch.setattr('webhooks.limits.timezone.now', lambda: now)
+    DeliveryAttempt.objects.create(
+        event=create_event(), visitor_id=visitor_id,
+        started_at=now - timedelta(seconds=age),
+    )
+    event = create_event()
+
+    if blocked:
+        with pytest.raises(DeliveryLimitError) as error:
+            _start_delivery(event.pk, visitor_id=visitor_id)
+        assert error.value.code == f'visitor_{window}_limit'
+        assert error.value.retry_after == 1
+        event.refresh_from_db()
+        assert event.status == Event.Status.PENDING
+        assert DeliveryAttempt.objects.count() == 1
+    else:
+        attempt = _start_delivery(event.pk, visitor_id=visitor_id)
+        assert attempt.visitor_id == visitor_id
+        assert DeliveryAttempt.objects.count() == 2
+
+
+def test_internal_calls_without_operator_do_not_share_visitor_minute_quota(
+    create_event, settings, sender,
+):
+    settings.WEBHOOK_MAX_DELIVERIES_PER_MINUTE = 1
+    _start_delivery(create_event().pk, visitor_id=uuid4())
+    internal = _start_delivery(create_event().pk)
+
+    with pytest.raises(DeliveryLimitError) as error:
+        _start_delivery(create_event().pk)
+
+    assert error.value.code == 'operator_limit'
+    assert internal.visitor_id is None
+    assert internal.initiated_by_id is None
+    assert DeliveryAttempt.objects.count() == 2
     sender.assert_not_called()
