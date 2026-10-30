@@ -2,15 +2,15 @@
 
 API para registrar eventos, enviar webhooks por HTTPS a destinos autorizados e consultar o resultado das tentativas.
 
+[**Acessar demonstração**](https://webhook-delivery-api.vercel.app/) · [Saúde da aplicação](https://webhook-delivery-api.vercel.app/api/saude/)
+
 Exemplo: uma loja registra `pedido.pago` com o ID de um pedido, solicita o envio ao receptor e consulta o resultado.
 
 **Fluxo:** cadastrar destino no admin → registrar evento → solicitar envio → consultar tentativa.
 
 **Stack:** Python 3.14, Django 5.2, DRF, PostgreSQL 17, Docker Compose e pytest. Uma aplicação Django, com execução síncrona e uma tentativa por evento.
 
-**Em desenvolvimento:** a interface para visitantes está implementada; sua ativação e verificação na hospedagem estão pendentes. O fluxo do operador já foi verificado por HTTPS com resultados salvos no Neon. Envios e receptores de demonstração ficam desabilitados por padrão.
-
-[Saúde da base publicada](https://webhook-delivery-api.vercel.app/api/saude/) — confirma que a aplicação responde; não verifica banco ou entrega de webhooks.
+**Demonstração ativa:** os cenários de sucesso e falha foram exercitados pela página pública, com entrega HTTPS e resultados persistidos no Neon. A instalação local mantém envios e receptores desabilitados por padrão. A rota de saúde confirma que a aplicação responde; não verifica banco ou entrega.
 
 ## Executar localmente
 
@@ -64,14 +64,16 @@ Se o banco já foi preparado pelo Docker, reaproveite as migrations e o usuário
 
 ## Demonstração no navegador
 
-Em `/`, escolha **Testar sucesso** ou **Testar falha**. Cada clique aceito cria um evento `pedido.pago` com `{"pedido_id": "PEDIDO-001"}`, solicita uma tentativa síncrona e mostra seu resultado. **Consultar resultado** busca o registro salvo, sem outro envio. Abrir a página não inicia chamadas de entrega.
+Em `/`, escolha **Testar sucesso** ou **Testar falha**. Cada clique aceito cria um evento `pedido.pago` com `{"pedido_id": "PEDIDO-001"}`, solicita uma tentativa síncrona e mostra seu resultado. **Conferir resultado salvo** busca o registro e confirma o horário da consulta, sem outro envio. Abrir a página não inicia chamadas de entrega.
+
+**Limites da demonstração publicada:** 3 envios em 60 segundos e 4 em 24 horas por navegador; 20 inícios em 24 horas somando todos os visitantes e operadores. Falhas também consomem cota.
 
 - `POST /demonstracao/enviar/`: aceita somente `{"scenario": "success"}` ou `{"scenario": "failure"}`, como JSON de até 1 KiB; excesso retorna `413`. Retorna `200` com a tentativa concluída, inclusive quando o receptor respondeu `500`.
 - `GET /demonstracao/eventos/<uuid>/`: consulta a tentativa pelo ID do evento e pelo cookie do visitante; sem esse vínculo, retorna `404`.
 
 Não exige login. O navegador recebe um cookie assinado, HttpOnly, com validade de 24 horas; POST exige CSRF mesmo sem autenticação. A aba lembra o último ID e avisa quando não há confirmação do envio. Não há reenvio automático. Apagar o cookie pode renovar o limite do visitante; o orçamento global continua valendo.
 
-Para habilitar, o operador deve:
+Para habilitar em outra instalação, o operador deve:
 
 1. Conferir migrations, cotas gratuitas e configurar proteção contra abuso na hospedagem antes de expor envios ao público.
 2. Autorizar as duas URLs HTTPS públicas dos receptores em `WEBHOOK_ALLOWED_URLS`, cadastrar os destinos com tipo `pedido.pago` e preencher seus UUIDs em `WEBHOOK_DEMO_SUCCESS_ENDPOINT_ID` e `WEBHOOK_DEMO_FAILURE_ENDPOINT_ID`.
@@ -141,10 +143,11 @@ Exigem envelope JSON UTF-8 com `id` UUID, `created_at` válido, `event_type: ped
 
 Os receptores não gravam dados nem fazem envios. Sua ativação não libera envios nem altera as permissões das rotas do operador. Chamadas pela internet consomem recursos da hospedagem.
 
-**Verificação real em Vercel/Neon:** dois eventos fictícios foram enviados por HTTPS aos receptores desta aplicação. O sucesso ficou `delivered`/HTTP `200`; a falha controlada ficou `failed`/HTTP `500`/`http_error`. Os resultados foram persistidos e consultados pela API com `200`. Os receptores foram desativados após a verificação.
+**Verificação real em 30/10/2026:** os dois cenários foram executados pela interface pública. Sucesso: `delivered`/HTTP `200`; falha controlada: `failed`/HTTP `500`/`http_error`. Os resultados foram apresentados na interface e conferidos diretamente no Neon. Outro cookie de visitante recebeu `404` ao consultar ambos os eventos.
 
 ## Segurança e limites
 
+- **Proteção de entrada:** na demonstração publicada, uma regra WAF configurada na Vercel limita `/demonstracao/` a 60 requisições em 60 segundos por IP e região; excesso retorna `429`. Os contadores são [regionais](https://vercel.com/docs/vercel-firewall/vercel-waf/rate-limiting), separados do orçamento global de entregas no banco.
 - **Destinos controlados:** `WEBHOOK_ALLOWED_URLS` contém URLs HTTPS completas e exatas, separadas por vírgulas. Vazia bloqueia cadastro e envio. Só use receptores que controla ou tem autorização para usar.
 - **Proteção de saída:** revalidação de URL e DNS/IP, conexão ao IP validado e certificado TLS para o domínio original. IPs internos são bloqueados; sem redirecionamentos, proxy do ambiente ou encaminhamento de credenciais recebidas.
 - **Dados:** payload como objeto JSON de até 16 KiB; envelope enviado de até 17 KiB. Corpo e headers da resposta externa não são persistidos.
