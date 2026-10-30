@@ -62,6 +62,9 @@ WEBHOOK_MAX_DELIVERIES_PER_MINUTE = _read_nonnegative_integer(
 WEBHOOK_MAX_DELIVERIES_PER_DAY = _read_nonnegative_integer(
     'WEBHOOK_MAX_DELIVERIES_PER_DAY', 0,
 )
+WEBHOOK_DEMO_MAX_DELIVERIES_PER_DAY = _read_nonnegative_integer(
+    'WEBHOOK_DEMO_MAX_DELIVERIES_PER_DAY', 4,
+)
 
 
 # Application definition

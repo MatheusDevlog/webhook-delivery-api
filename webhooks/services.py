@@ -16,7 +16,7 @@ class InvalidEventForDelivery(ValidationError):
     pass
 
 
-def _reserve_delivery(event, initiated_by=None):
+def _reserve_delivery(event, initiated_by=None, visitor_id=None):
     if not connection.in_atomic_block:
         raise RuntimeError('A reserva de entrega exige uma transação ativa.')
     if event.status != Event.Status.PENDING or DeliveryAttempt.objects.filter(
@@ -34,15 +34,17 @@ def _reserve_delivery(event, initiated_by=None):
     if not updated:
         raise DeliveryAlreadyStarted
 
-    check_delivery_limits(initiated_by)
+    check_delivery_limits(initiated_by, visitor_id=visitor_id)
     event.status = Event.Status.SENDING
-    return DeliveryAttempt.objects.create(event=event, initiated_by=initiated_by)
+    return DeliveryAttempt.objects.create(
+        event=event, initiated_by=initiated_by, visitor_id=visitor_id,
+    )
 
 
-def _start_delivery(event_id, initiated_by=None):
+def _start_delivery(event_id, initiated_by=None, visitor_id=None):
     with transaction.atomic(durable=True):
         event = Event.objects.get(pk=event_id)
-        return _reserve_delivery(event, initiated_by=initiated_by)
+        return _reserve_delivery(event, initiated_by=initiated_by, visitor_id=visitor_id)
 
 
 def _send_and_finish_delivery(attempt):
@@ -75,6 +77,6 @@ def _send_and_finish_delivery(attempt):
     return attempt
 
 
-def deliver_event(event_id, initiated_by=None):
-    attempt = _start_delivery(event_id, initiated_by=initiated_by)
+def deliver_event(event_id, initiated_by=None, visitor_id=None):
+    attempt = _start_delivery(event_id, initiated_by=initiated_by, visitor_id=visitor_id)
     return _send_and_finish_delivery(attempt)

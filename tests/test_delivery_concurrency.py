@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from unittest.mock import Mock
+from uuid import uuid4
 
 import pytest
 from django.db import connection, connections
@@ -65,19 +66,23 @@ def test_concurrent_starts_create_only_one_attempt(settings, monkeypatch, send_e
     assert event.status == (Event.Status.DELIVERED if send_event else Event.Status.SENDING)
 
 
-@pytest.mark.parametrize('budget', ['global', 'operator'])
+@pytest.mark.parametrize('budget', ['global', 'operator', 'visitor_minute', 'visitor_day'])
 def test_concurrent_events_cannot_take_the_same_last_budget_slot(
     settings, monkeypatch, django_user_model, budget,
 ):
     settings.WEBHOOK_ALLOWED_URLS = ['https://receiver.example/webhook']
     settings.WEBHOOK_MAX_DELIVERIES_PER_DAY = 1 if budget == 'global' else 20
-    settings.WEBHOOK_MAX_DELIVERIES_PER_MINUTE = 1 if budget == 'operator' else 3
+    settings.WEBHOOK_MAX_DELIVERIES_PER_MINUTE = 1 if budget in {'operator', 'visitor_minute'} else 3
+    settings.WEBHOOK_DEMO_MAX_DELIVERIES_PER_DAY = 1 if budget == 'visitor_day' else 4
     endpoint = WebhookEndpoint.objects.create(
         url=settings.WEBHOOK_ALLOWED_URLS[0], event_type='pedido.pago',
     )
     first = django_user_model.objects.create_user(username='first', is_staff=True)
     second = django_user_model.objects.create_user(username='second', is_staff=True)
     actors = [first, second if budget == 'global' else first]
+    visitor_id = uuid4() if budget.startswith('visitor_') else None
+    if visitor_id is not None:
+        actors = [None, None]
     events = [
         Event.objects.create(endpoint=endpoint, event_type='pedido.pago', payload={})
         for _ in range(2)
@@ -98,7 +103,7 @@ def test_concurrent_events_cannot_take_the_same_last_budget_slot(
             with connection.cursor() as cursor:
                 cursor.execute('SET statement_timeout = 10000')
             try:
-                deliver_event(event_id, initiated_by=actor)
+                deliver_event(event_id, initiated_by=actor, visitor_id=visitor_id)
                 return 'sent'
             except DeliveryLimitError as error:
                 return error.code
@@ -109,7 +114,8 @@ def test_concurrent_events_cannot_take_the_same_last_budget_slot(
         futures = [pool.submit(send, event.pk, actor) for event, actor in zip(events, actors)]
         results = [future.result(timeout=15) for future in futures]
 
-    assert sorted(results) == [f'{budget}_limit', 'sent']
+    assert sorted(results) == sorted([f'{budget}_limit', 'sent'])
     assert DeliveryAttempt.objects.count() == 1
+    assert DeliveryAttempt.objects.get().visitor_id == visitor_id
     assert sorted(Event.objects.values_list('status', flat=True)) == ['delivered', 'pending']
     sender.assert_called_once()

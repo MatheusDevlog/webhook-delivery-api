@@ -1,5 +1,6 @@
 from datetime import timedelta
 from math import ceil
+from uuid import UUID
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -31,12 +32,22 @@ def _check_window(attempts, now, window, limit, code, message):
         raise DeliveryLimitError(code, message, retry_after=wait)
 
 
-def check_delivery_limits(initiated_by=None):
+def check_delivery_limits(initiated_by=None, visitor_id=None):
+    if visitor_id is not None and (
+        not isinstance(visitor_id, UUID) or initiated_by is not None
+    ):
+        raise ValueError('Informe um UUID de visitante sem associar um operador.')
     per_minute = settings.WEBHOOK_MAX_DELIVERIES_PER_MINUTE
     per_day = settings.WEBHOOK_MAX_DELIVERIES_PER_DAY
-    if any(type(value) is not int or value < 0 for value in (per_minute, per_day)):
+    visitor_per_day = (
+        settings.WEBHOOK_DEMO_MAX_DELIVERIES_PER_DAY if visitor_id is not None else None
+    )
+    limits = (
+        (per_minute, per_day, visitor_per_day) if visitor_id is not None else (per_minute, per_day)
+    )
+    if any(type(value) is not int or value < 0 for value in limits):
         raise ImproperlyConfigured('Os limites de envio devem ser inteiros não negativos.')
-    if not per_minute or not per_day:
+    if 0 in limits:
         raise DeliveryLimitError('disabled', 'O envio de webhooks está desabilitado.')
     if not connection.in_atomic_block:
         raise RuntimeError('O orçamento deve ser verificado dentro da transação de início.')
@@ -60,7 +71,21 @@ def check_delivery_limits(initiated_by=None):
         attempts, now, timedelta(hours=24), per_day, 'global_limit',
         'O orçamento de envios das últimas 24 horas foi atingido.',
     )
-    _check_window(
-        attempts.filter(initiated_by=initiated_by), now, timedelta(minutes=1),
-        per_minute, 'operator_limit', 'O limite de envios por minuto foi atingido.',
-    )
+    if visitor_id is not None:
+        visitor_attempts = attempts.filter(visitor_id=visitor_id)
+        _check_window(
+            visitor_attempts, now, timedelta(minutes=1), per_minute,
+            'visitor_minute_limit', 'O limite de envios por minuto deste navegador foi atingido.',
+        )
+        _check_window(
+            visitor_attempts, now, timedelta(hours=24), visitor_per_day,
+            'visitor_day_limit', 'O limite de envios das últimas 24 horas deste navegador foi atingido.',
+        )
+    else:
+        operator_attempts = attempts.filter(initiated_by=initiated_by)
+        if initiated_by is None:
+            operator_attempts = operator_attempts.filter(visitor_id__isnull=True)
+        _check_window(
+            operator_attempts, now, timedelta(minutes=1), per_minute,
+            'operator_limit', 'O limite de envios por minuto foi atingido.',
+        )
