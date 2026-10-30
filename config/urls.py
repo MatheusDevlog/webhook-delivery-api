@@ -17,11 +17,15 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 
+from webhooks.demo_views import demo_detail, demo_home, demo_send
 from webhooks.receivers import DemoReceiver
 
 from .views import health
 
 urlpatterns = [
+    path('', demo_home, name='demo-home'),
+    path('demonstracao/enviar/', demo_send, name='demo-send'),
+    path('demonstracao/eventos/<uuid:event_id>/', demo_detail, name='demo-detail'),
     path('api/saude/', health, name='health'),
     path('api/', include('webhooks.urls')),
     path('admin/', admin.site.urls),
