@@ -47,6 +47,10 @@
         <div class="section-heading"><p class="eyebrow">02 / Acompanhe</p><span id="result-status" class="badge">Em espera</span></div>
         <h2 id="result-title">Resultado da tentativa</h2>
         <p id="result-message" role="status" aria-live="polite">O resultado aparecerá aqui depois do seu teste.</p>
+        <div id="consult-confirmation" class="consult-confirmation" role="status" aria-live="polite" aria-atomic="true" hidden>
+          <strong id="consult-confirmation-title"></strong>
+          <p id="consult-confirmation-message"></p>
+        </div>
         <div id="result-data" hidden>
           <dl>
             <dt>Evento</dt><dd id="result-event-id"></dd>
@@ -55,8 +59,8 @@
           </dl>
           <details><summary>Ver resposta da API</summary><pre id="result-json"></pre></details>
         </div>
-        <button id="consult-result" class="secondary" type="button" disabled>Consultar resultado</button>
-        <p class="note">Consultar busca o registro salvo; não faz outro envio. O resultado fica vinculado a este navegador por um cookie temporário, válido por até 24 horas.</p>
+        <button id="consult-result" class="secondary" type="button" disabled>Conferir resultado salvo</button>
+        <p class="note">A consulta busca no serviço o registro desta tentativa, sem realizar outro envio. O resultado fica vinculado a este navegador por um cookie temporário, válido por até 24 horas.</p>
       </section>
     </div>
     <aside class="limits" aria-label="Limites da demonstração">

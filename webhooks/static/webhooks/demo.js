@@ -51,7 +51,20 @@
     badge.dataset.state = state;
   }
 
-  function showResult(data) {
+  function confirmConsultation(label) {
+    const time = new Date().toLocaleTimeString('pt-BR', {
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+    element('consult-confirmation-title').textContent = `Registro consultado às ${time}`;
+    element('consult-confirmation-message').textContent = `Resultado salvo: ${label}. Nenhum novo envio foi realizado.`;
+    element('consult-confirmation').hidden = false;
+    const panel = element('result-panel');
+    panel.classList.remove('consulted');
+    void panel.offsetWidth;
+    panel.classList.add('consulted');
+  }
+
+  function showResult(data, consulted = false) {
     eventId = data.event_id;
     uncertain = ['pending', 'sending'].includes(data.event_status);
     const [label, description] = states[data.event_status];
@@ -65,12 +78,15 @@
     element('result-json').textContent = JSON.stringify(data, null, 2);
     element('result-data').hidden = false;
     remember();
+    if (consulted) confirmConsultation(label);
   }
 
   async function request(scenario = null) {
     const sending = scenario !== null;
     if (busy || (sending ? !config.enabled || uncertain : !eventId)) return;
     busy = true;
+    element('consult-confirmation').hidden = true;
+    element('result-panel').classList.remove('consulted');
     element('result-data').hidden = true;
     if (sending) {
       eventId = null;
@@ -110,7 +126,7 @@
       }
       if (!validId(data?.event_id) || !Object.hasOwn(states, data?.event_status)
         || (!sending && data.event_id !== eventId)) throw new Error('invalid_response');
-      showResult(data);
+      showResult(data, !sending);
     } catch {
       announce(sending
         ? 'Não recebemos confirmação do envio. O receptor pode ter recebido o evento. Evite repetir o teste.'
@@ -124,6 +140,6 @@
   buttons.forEach((button) => { button.addEventListener('click', () => request(button.dataset.scenario)); });
   consult.addEventListener('click', () => request());
   if (uncertain) announce('Há uma tentativa sem confirmação nesta aba. Consulte o resultado, se disponível, antes de iniciar outro envio.', 'Sem confirmação');
-  else if (eventId) announce('Há um resultado desta aba. Clique em Consultar resultado para buscá-lo.', 'Disponível para consulta');
+  else if (eventId) announce('Há um resultado desta aba. Clique em Conferir resultado salvo para buscá-lo.', 'Disponível para consulta');
   updateControls();
 })();

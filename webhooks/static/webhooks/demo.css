@@ -56,6 +56,16 @@ dt { color: var(--muted); font-size: 0.8rem; margin-top: 16px; }
 dd { margin: 5px 0 0; font-size: 0.92rem; overflow-wrap: anywhere; }
 summary { cursor: pointer; color: var(--accent); padding-block: 8px; }
 #consult-result { margin-top: 20px; }
+.consult-confirmation { margin-block: 18px; padding: 14px 16px; border-left: 3px solid var(--accent); border-radius: 8px; background: #eaf3ef; }
+.consult-confirmation p { margin: 6px 0 0; font-size: 0.88rem; }
+.result-card.consulted { animation: consultation-highlight 900ms ease-out; }
+@keyframes consultation-highlight {
+  from { background-color: #e0f2ea; box-shadow: 0 0 0 3px #b6dacf; }
+  to { background-color: white; box-shadow: 0 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .result-card.consulted { animation: none; }
+}
 .limits { margin-top: 24px; padding: 22px 28px; border-left: 3px solid var(--accent); }
 .limits p { margin: 6px 0; font-size: 0.85rem; }
 footer { margin-top: 32px; padding-block: 24px 32px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.8rem; }
