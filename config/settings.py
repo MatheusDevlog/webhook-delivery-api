@@ -44,6 +44,9 @@ WEBHOOK_ALLOWED_URLS = [
 ]
 
 WEBHOOK_DEMO_RECEIVER_ENABLED = os.environ.get('WEBHOOK_DEMO_RECEIVER_ENABLED', 'False') == 'True'
+WEBHOOK_DEMO_ENABLED = os.environ.get('WEBHOOK_DEMO_ENABLED', 'False') == 'True'
+WEBHOOK_DEMO_SUCCESS_ENDPOINT_ID = os.environ.get('WEBHOOK_DEMO_SUCCESS_ENDPOINT_ID', '')
+WEBHOOK_DEMO_FAILURE_ENDPOINT_ID = os.environ.get('WEBHOOK_DEMO_FAILURE_ENDPOINT_ID', '')
 
 
 def _read_nonnegative_integer(name, default):
